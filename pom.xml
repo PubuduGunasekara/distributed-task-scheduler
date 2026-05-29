@@ -51,6 +51,7 @@
 			<artifactId>spring-boot-starter-data-redis</artifactId>
 		</dependency>
 
+
 		<!-- Validation -->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
@@ -135,6 +136,12 @@
 		<dependency>
 			<groupId>org.testcontainers</groupId>
 			<artifactId>kafka</artifactId>
+			<scope>test</scope>
+		</dependency>
+		<!-- JUnit 5 extension for @Testcontainers and @Container annotations -->
+		<dependency>
+			<groupId>org.testcontainers</groupId>
+			<artifactId>junit-jupiter</artifactId>
 			<scope>test</scope>
 		</dependency>
 		<dependency>
@@ -232,6 +239,8 @@
 								<exclude>com/taskscheduler/config/**/*</exclude>
 								<exclude>**/*MapperImpl*.class</exclude>
 								<exclude>com/taskscheduler/domain/model/**/*</exclude>
+								<!-- API layer tested in M2 with @WebMvcTest -->
+								<exclude>com/taskscheduler/api/**/*</exclude>
 							</excludes>
 						</configuration>
 					</execution>
