@@ -6,6 +6,19 @@ spring:
     virtual:
       enabled: true
 
+  jackson:
+    # Serialize Instant as "2026-05-29T10:00:00Z" not as 1748512800.000
+    # Without this, all your Instant fields become Unix timestamps in the API.
+    serialization:
+      write-dates-as-timestamps: false
+
+  mvc:
+    # Enables RFC 7807 Problem Details format for Spring MVC exceptions.
+    # This means MethodArgumentNotValidException → proper ProblemDetail JSON
+    # instead of Spring's default white-label error page.
+    problemdetails:
+        enabled: true
+
   datasource:
     url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:taskscheduler}
     username: ${DB_USER:taskscheduler}
