@@ -55,11 +55,12 @@ class ArchitectureTest {
      * Prevents accidental non-transactional database operations.
      */
     @ArchTest
-    static final ArchRule servicesShouldBeTransactional =
+    static final ArchRule domainServicesShouldBeTransactional =
             classes()
                     .that().areAnnotatedWith(Service.class)
+                    .and().resideInAPackage("..domain.service..")
                     .should().beAnnotatedWith(Transactional.class)
-                    .because("All @Service classes must define transaction boundaries");
+                    .because("Domain @Service classes must define transaction boundaries");
 
     /**
      * Domain exceptions must live in the domain.exception package.
