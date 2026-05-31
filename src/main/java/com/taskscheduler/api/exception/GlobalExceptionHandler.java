@@ -115,4 +115,23 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         problem.setProperty("errors", errors);
         return problem;
     }
+
+    /**
+     * Catch-all for any exception not explicitly handled above.
+     * Logs the full stack trace server-side but returns a safe
+     * generic message to clients — never leak internal details.
+     *
+     * We removed this in M2 when we extended ResponseEntityExceptionHandler.
+     * Adding it back with @Order(Ordered.HIGHEST_PRECEDENCE) to ensure
+     * it overrides the parent's generic handling.
+     */
+    @ExceptionHandler(Exception.class)
+    public ProblemDetail handleGeneric(Exception ex) {
+        log.error("Unhandled exception: {}", ex.getMessage(), ex);
+        ProblemDetail problem = ProblemDetail
+                .forStatusAndDetail(HttpStatus.INTERNAL_SERVER_ERROR,
+                        "An unexpected error occurred");
+        problem.setTitle("Internal Server Error");
+        return problem;
+    }
 }

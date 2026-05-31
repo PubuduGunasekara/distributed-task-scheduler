@@ -1,8 +1,10 @@
 package com.taskscheduler.domain.service;
 
+import com.taskscheduler.domain.event.TaskEventType;
 import com.taskscheduler.domain.exception.TaskNotFoundException;
 import com.taskscheduler.domain.model.Task;
 import com.taskscheduler.domain.model.TaskStatus;
+import com.taskscheduler.domain.port.TaskEventPort;
 import com.taskscheduler.domain.repository.TaskRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -34,16 +36,15 @@ public class TaskService {
     private static final int DEFAULT_BATCH_SIZE = 10;
 
     private final TaskRepository taskRepository;
+    private final TaskEventPort taskEventPort;
 
     public Task createTask(
-            String name,
-            String type,
-            String payload,
-            int priority,
-            Instant scheduledAt
+            String name, String type, String payload,
+            int priority, Instant scheduledAt
     ) {
         Task task  = Task.create(name, type, payload, priority, scheduledAt);
         Task saved = taskRepository.save(task);
+        taskEventPort.publish(saved, TaskEventType.TASK_CREATED);   // ← ADD
         log.info("Task created: id={} name='{}' type={} priority={} scheduledAt={}",
                 saved.getId(), saved.getName(), saved.getType(),
                 saved.getPriority(), saved.getScheduledAt());
@@ -74,6 +75,7 @@ public class TaskService {
         Task task  = getTask(id);
         task.start();
         Task saved = taskRepository.save(task);
+        taskEventPort.publish(saved, TaskEventType.TASK_STARTED);   // ← ADD
         log.info("Task started: id={}", id);
         return saved;
     }
@@ -82,6 +84,7 @@ public class TaskService {
         Task task  = getTask(id);
         task.complete();
         Task saved = taskRepository.save(task);
+        taskEventPort.publish(saved, TaskEventType.TASK_COMPLETED); // ← ADD
         log.info("Task completed: id={}", id);
         return saved;
     }
@@ -90,6 +93,7 @@ public class TaskService {
         Task task  = getTask(id);
         task.fail(errorMessage);
         Task saved = taskRepository.save(task);
+        taskEventPort.publish(saved, TaskEventType.TASK_FAILED);    // ← ADD
         log.warn("Task failed: id={} retryCount={} status={} error='{}'",
                 id, saved.getRetryCount(), saved.getStatus(), errorMessage);
         return saved;
@@ -99,6 +103,7 @@ public class TaskService {
         Task task  = getTask(id);
         task.cancel();
         Task saved = taskRepository.save(task);
+        taskEventPort.publish(saved, TaskEventType.TASK_CANCELLED); // ← ADD
         log.info("Task cancelled: id={}", id);
         return saved;
     }

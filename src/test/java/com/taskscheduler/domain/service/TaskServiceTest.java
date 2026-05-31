@@ -1,8 +1,10 @@
 package com.taskscheduler.domain.service;
 
+import com.taskscheduler.domain.event.TaskEventType;
 import com.taskscheduler.domain.exception.TaskNotFoundException;
 import com.taskscheduler.domain.model.Task;
 import com.taskscheduler.domain.model.TaskStatus;
+import com.taskscheduler.domain.port.TaskEventPort;
 import com.taskscheduler.domain.repository.TaskRepository;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -30,6 +32,9 @@ class TaskServiceTest {
 
     @Mock
     private TaskRepository taskRepository;
+
+    @Mock
+    private TaskEventPort taskEventPort;
 
     @InjectMocks
     private TaskService taskService;
@@ -134,6 +139,8 @@ class TaskServiceTest {
 
             assertThat(result.getStatus()).isEqualTo(TaskStatus.PENDING);
             verify(taskRepository, times(1)).save(any(Task.class));
+            verify(taskEventPort, times(1))                          // ← ADD
+                    .publish(any(Task.class), eq(TaskEventType.TASK_CREATED));
         }
 
         @Test
@@ -151,6 +158,60 @@ class TaskServiceTest {
             assertThat(captured.getType()).isEqualTo("REPORT");
             assertThat(captured.getPriority()).isEqualTo(8);
             assertThat(captured.getScheduledAt()).isEqualTo(scheduledAt);
+        }
+    }
+
+    @Nested
+    @DisplayName("event publishing")
+    class EventPublishing {
+
+        @Test
+        @DisplayName("createTask should publish TASK_CREATED event")
+        void createTaskShouldPublishCreatedEvent() {
+            when(taskRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+            taskService.createTask("task", "EMAIL", "{}", 1, Instant.now());
+
+            verify(taskEventPort).publish(any(Task.class), eq(TaskEventType.TASK_CREATED));
+        }
+
+        @Test
+        @DisplayName("startTask should publish TASK_STARTED event")
+        void startTaskShouldPublishStartedEvent() {
+            UUID id   = UUID.randomUUID();
+            Task task = buildPendingTask();
+            when(taskRepository.findById(id)).thenReturn(Optional.of(task));
+            when(taskRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+            taskService.startTask(id);
+
+            verify(taskEventPort).publish(any(Task.class), eq(TaskEventType.TASK_STARTED));
+        }
+
+        @Test
+        @DisplayName("completeTask should publish TASK_COMPLETED event")
+        void completeTaskShouldPublishCompletedEvent() {
+            UUID id   = UUID.randomUUID();
+            Task task = buildRunningTask();
+            when(taskRepository.findById(id)).thenReturn(Optional.of(task));
+            when(taskRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+            taskService.completeTask(id);
+
+            verify(taskEventPort).publish(any(Task.class), eq(TaskEventType.TASK_COMPLETED));
+        }
+
+        @Test
+        @DisplayName("cancelTask should publish TASK_CANCELLED event")
+        void cancelTaskShouldPublishCancelledEvent() {
+            UUID id   = UUID.randomUUID();
+            Task task = buildPendingTask();
+            when(taskRepository.findById(id)).thenReturn(Optional.of(task));
+            when(taskRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+            taskService.cancelTask(id);
+
+            verify(taskEventPort).publish(any(Task.class), eq(TaskEventType.TASK_CANCELLED));
         }
     }
 

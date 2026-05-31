@@ -59,11 +59,14 @@ spring:
           min-idle: 2
           max-wait: 2000ms
 
-  kafka:
+kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
     admin:
-      operation-timeout: 5
       fail-fast: false
+      operation-timeout: 30
+    properties:
+      request.timeout.ms: 30000
+      default.api.timeout.ms: 30000
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.springframework.kafka.support.serializer.JsonSerializer

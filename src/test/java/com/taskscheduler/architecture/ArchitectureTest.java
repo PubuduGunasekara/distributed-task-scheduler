@@ -72,4 +72,27 @@ class ArchitectureTest {
                     .and().resideInAPackage("com.taskscheduler..")
                     .should().resideInAPackage("..domain.exception..")
                     .because("All domain exceptions belong in the domain.exception package");
+
+    /**
+     * Domain ports are internal to the domain — infrastructure implements them,
+     * nothing outside the domain/infrastructure boundary calls them directly.
+     */
+    @ArchTest
+    static final ArchRule portsShouldLiveInDomainPortPackage =
+            classes()
+                    .that().haveSimpleNameEndingWith("Port")
+                    .and().resideInAPackage("com.taskscheduler..")
+                    .should().resideInAPackage("..domain.port..")
+                    .because("Port interfaces belong in domain.port package");
+
+    /**
+     * Infrastructure must implement domain ports — not bypass them.
+     */
+    @ArchTest
+    static final ArchRule infrastructureShouldImplementDomainPorts =
+            classes()
+                    .that().resideInAPackage("..infrastructure..")
+                    .and().implement(
+                            com.taskscheduler.domain.port.TaskEventPort.class)
+                    .should().resideInAPackage("..infrastructure..");
 }
