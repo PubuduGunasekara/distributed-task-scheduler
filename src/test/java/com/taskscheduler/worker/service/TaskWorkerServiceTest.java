@@ -5,6 +5,7 @@ import com.taskscheduler.domain.event.TaskEventType;
 import com.taskscheduler.domain.exception.TaskNotFoundException;
 import com.taskscheduler.domain.model.Task;
 import com.taskscheduler.domain.model.TaskStatus;
+import com.taskscheduler.domain.port.DistributedLockPort;
 import com.taskscheduler.domain.service.TaskService;
 import com.taskscheduler.worker.executor.TaskExecutorRegistry;
 import org.junit.jupiter.api.DisplayName;
@@ -27,9 +28,75 @@ class TaskWorkerServiceTest {
 
     @Mock private TaskService          taskService;
     @Mock private TaskExecutorRegistry executorRegistry;
+    @Mock private DistributedLockPort  lockPort;
 
     @InjectMocks
     private TaskWorkerService workerService;
+
+    // =========================================================
+    // LOCKING BEHAVIOUR
+    // =========================================================
+
+    @Nested
+    @DisplayName("distributed locking")
+    class Locking {
+
+        @Test
+        @DisplayName("should skip task when lock is not available")
+        void shouldSkipWhenLockNotAvailable() {
+            UUID taskId = UUID.randomUUID();
+            when(lockPort.acquireLock(eq(taskId), anyString())).thenReturn(false);
+
+            workerService.process(createdEvent(taskId));
+
+            verifyNoInteractions(taskService, executorRegistry);
+        }
+
+        @Test
+        @DisplayName("should release lock after successful execution")
+        void shouldReleaseLockAfterSuccess() throws Exception {
+            UUID id      = UUID.randomUUID();
+            Task running = minimalMock(id);
+            when(lockPort.acquireLock(eq(id), anyString())).thenReturn(true);
+            when(taskService.startTask(id)).thenReturn(running);
+
+            workerService.process(createdEvent(id));
+
+            verify(lockPort).releaseLock(eq(id), anyString());
+        }
+
+        @Test
+        @DisplayName("should release lock even when startTask throws")
+        void shouldReleaseLockWhenStartTaskThrows() {
+            UUID id = UUID.randomUUID();
+            when(lockPort.acquireLock(eq(id), anyString())).thenReturn(true);
+            when(taskService.startTask(id))
+                    .thenThrow(new IllegalStateException("already RUNNING"));
+
+            workerService.process(createdEvent(id));
+
+            verify(lockPort).releaseLock(eq(id), anyString());
+        }
+
+        @Test
+        @DisplayName("should release lock even when execution fails")
+        void shouldReleaseLockWhenExecutionFails() throws Exception {
+            UUID id      = UUID.randomUUID();
+            Task running = minimalMock(id);
+            when(lockPort.acquireLock(eq(id), anyString())).thenReturn(true);
+            when(taskService.startTask(id)).thenReturn(running);
+            doThrow(new RuntimeException("timeout"))
+                    .when(executorRegistry).execute(running);
+
+            workerService.process(createdEvent(id));
+
+            verify(lockPort).releaseLock(eq(id), anyString());
+        }
+    }
+
+    // =========================================================
+    // PROCESSING BEHAVIOUR
+    // =========================================================
 
     @Nested
     @DisplayName("process() — TASK_CREATED")
@@ -39,12 +106,9 @@ class TaskWorkerServiceTest {
         @DisplayName("should start, execute, and complete task on success")
         void shouldStartExecuteAndComplete() throws Exception {
             UUID id      = UUID.randomUUID();
-            Task running = mock(Task.class);
-            when(running.getId()).thenReturn(id); // only field accessed in executeAndFinalize()
-
+            Task running = minimalMock(id);
+            when(lockPort.acquireLock(eq(id), anyString())).thenReturn(true);
             when(taskService.startTask(id)).thenReturn(running);
-            // executorRegistry.execute() is void — Mockito does nothing by default, no stub needed
-            // taskService.completeTask() return value is unused in worker — no stub needed
 
             workerService.process(createdEvent(id));
 
@@ -58,9 +122,8 @@ class TaskWorkerServiceTest {
         @DisplayName("should fail task when executor throws")
         void shouldFailTaskWhenExecutorThrows() throws Exception {
             UUID id      = UUID.randomUUID();
-            Task running = mock(Task.class);
-            when(running.getId()).thenReturn(id); // only getId() is accessed in this path
-
+            Task running = minimalMock(id);
+            when(lockPort.acquireLock(eq(id), anyString())).thenReturn(true);
             when(taskService.startTask(id)).thenReturn(running);
             doThrow(new RuntimeException("connection timeout"))
                     .when(executorRegistry).execute(running);
@@ -72,9 +135,10 @@ class TaskWorkerServiceTest {
         }
 
         @Test
-        @DisplayName("should skip when task is not PENDING — duplicate delivery guard")
+        @DisplayName("should skip when task is not in PENDING state")
         void shouldSkipWhenTaskNotPending() throws Exception {
             UUID id = UUID.randomUUID();
+            when(lockPort.acquireLock(eq(id), anyString())).thenReturn(true);
             when(taskService.startTask(id))
                     .thenThrow(new IllegalStateException("Task already RUNNING"));
 
@@ -86,9 +150,10 @@ class TaskWorkerServiceTest {
         }
 
         @Test
-        @DisplayName("should skip when task not found in database")
+        @DisplayName("should skip when task not found")
         void shouldSkipWhenTaskNotFound() throws Exception {
             UUID id = UUID.randomUUID();
+            when(lockPort.acquireLock(eq(id), anyString())).thenReturn(true);
             when(taskService.startTask(id))
                     .thenThrow(new TaskNotFoundException(id));
 
@@ -98,42 +163,52 @@ class TaskWorkerServiceTest {
         }
     }
 
+    // =========================================================
+    // NON-ACTIONABLE EVENTS
+    // =========================================================
+
     @Nested
     @DisplayName("process() — non-TASK_CREATED events")
     class ProcessOtherEvents {
 
         @Test
         @DisplayName("should skip TASK_STARTED event")
-        void shouldSkipStartedEvent() {
+        void shouldSkipStarted() {
             workerService.process(eventOf(UUID.randomUUID(), TaskEventType.TASK_STARTED));
-            verifyNoInteractions(taskService, executorRegistry);
+            verifyNoInteractions(lockPort, taskService, executorRegistry);
         }
 
         @Test
         @DisplayName("should skip TASK_COMPLETED event")
-        void shouldSkipCompletedEvent() {
+        void shouldSkipCompleted() {
             workerService.process(eventOf(UUID.randomUUID(), TaskEventType.TASK_COMPLETED));
-            verifyNoInteractions(taskService, executorRegistry);
+            verifyNoInteractions(lockPort, taskService, executorRegistry);
         }
 
         @Test
         @DisplayName("should skip TASK_FAILED event")
-        void shouldSkipFailedEvent() {
+        void shouldSkipFailed() {
             workerService.process(eventOf(UUID.randomUUID(), TaskEventType.TASK_FAILED));
-            verifyNoInteractions(taskService, executorRegistry);
+            verifyNoInteractions(lockPort, taskService, executorRegistry);
         }
 
         @Test
         @DisplayName("should skip TASK_CANCELLED event")
-        void shouldSkipCancelledEvent() {
+        void shouldSkipCancelled() {
             workerService.process(eventOf(UUID.randomUUID(), TaskEventType.TASK_CANCELLED));
-            verifyNoInteractions(taskService, executorRegistry);
+            verifyNoInteractions(lockPort, taskService, executorRegistry);
         }
     }
 
     // =========================================================
     // HELPERS
     // =========================================================
+
+    private Task minimalMock(UUID id) {
+        Task task = mock(Task.class);
+        when(task.getId()).thenReturn(id);
+        return task;
+    }
 
     private TaskEvent createdEvent(UUID taskId) {
         return eventOf(taskId, TaskEventType.TASK_CREATED);

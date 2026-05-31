@@ -69,4 +69,23 @@ public class TaskEventPublisher implements TaskEventPort {
                     }
                 });
     }
+
+    @Override
+    public void publishDeadLetter(Task task) {
+        TaskEvent event = TaskEvent.from(task, TaskEventType.TASK_FAILED);
+
+        kafkaTemplate.send(KafkaTopicConfig.TASK_DLQ_TOPIC, task.getId().toString(), event)
+                .whenComplete((result, ex) -> {
+                    if (ex != null) {
+                        log.error("Failed to publish dead letter: taskId={} error={}",
+                                task.getId(), ex.getMessage());
+                    } else {
+                        log.warn("Dead letter published: taskId={} retryCount={} partition={} offset={}",
+                                task.getId(), task.getRetryCount(),
+                                result.getRecordMetadata().partition(),
+                                result.getRecordMetadata().offset());
+                    }
+                });
+    }
+
 }

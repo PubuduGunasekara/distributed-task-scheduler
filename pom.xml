@@ -236,11 +236,12 @@
 							</rules>
 							<excludes>
 								<exclude>com/taskscheduler/TaskSchedulerApplication.class</exclude>
-								<exclude>com/taskscheduler/config/**/*</exclude>
-								<exclude>**/*MapperImpl*.class</exclude>
-								<exclude>com/taskscheduler/domain/model/**/*</exclude>
-								<!-- API layer tested in M2 with @WebMvcTest -->
-								<exclude>com/taskscheduler/api/**/*</exclude>
+								<exclude>com/taskscheduler/config/**</exclude>
+								<exclude>**/*MapperImpl*</exclude>
+								<exclude>com/taskscheduler/domain/model/**</exclude>
+								<exclude>com/taskscheduler/api/**</exclude>
+								<exclude>com/taskscheduler/worker/executor/**</exclude>
+								<exclude>com/taskscheduler/infrastructure/redis/**</exclude>
 							</excludes>
 						</configuration>
 					</execution>

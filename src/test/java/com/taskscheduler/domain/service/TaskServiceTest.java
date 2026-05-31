@@ -291,6 +291,106 @@ class TaskServiceTest {
         }
     }
 
+    @Nested
+    @DisplayName("failTask() — DLQ routing")
+    class FailTaskDlq {
+
+        @Test
+        @DisplayName("should publish TASK_FAILED event when retries remain")
+        void shouldPublishFailedEventWhenRetryable() {
+            UUID id   = UUID.randomUUID();
+            Task task = buildPendingTask();
+            task.start(); // PENDING → RUNNING
+            when(taskRepository.findById(id)).thenReturn(Optional.of(task));
+            when(taskRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+            taskService.failTask(id, "timeout");
+
+            verify(taskEventPort).publish(any(Task.class), eq(TaskEventType.TASK_FAILED));
+            verify(taskEventPort, never()).publishDeadLetter(any());
+        }
+
+        @Test
+        @DisplayName("should publish to DLQ when retries exhausted")
+        void shouldPublishDeadLetterWhenRetriesExhausted() {
+            UUID id   = UUID.randomUUID();
+            Task task = buildPendingTask();
+
+            // Exhaust retries: max=3, so fail 3 times
+            for (int i = 0; i < 2; i++) {
+                task.start();
+                task.fail("error " + i);
+                if (task.getStatus() == TaskStatus.FAILED) {
+                    task.scheduleRetry();
+                }
+            }
+            task.start(); // Start the final attempt
+            // One more fail will push retryCount to 3 = maxRetries → DEAD_LETTER
+
+            when(taskRepository.findById(id)).thenReturn(Optional.of(task));
+            when(taskRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+            taskService.failTask(id, "final failure");
+
+            verify(taskEventPort).publishDeadLetter(any(Task.class));
+            verify(taskEventPort, never()).publish(any(), eq(TaskEventType.TASK_FAILED));
+        }
+    }
+
+    @Nested
+    @DisplayName("scheduleRetry()")
+    class ScheduleRetry {
+
+        @Test
+        @DisplayName("should transition task from FAILED to PENDING")
+        void shouldTransitionFailedToPending() {
+            UUID id   = UUID.randomUUID();
+            Task task = buildPendingTask();
+            task.start();
+            task.fail("error");
+
+            when(taskRepository.findById(id)).thenReturn(Optional.of(task));
+            when(taskRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+            Task result = taskService.scheduleRetry(id);
+
+            assertThat(result.getStatus()).isEqualTo(TaskStatus.PENDING);
+        }
+
+        @Test
+        @DisplayName("should publish TASK_CREATED event for re-queuing")
+        void shouldPublishTaskCreatedEvent() {
+            UUID id   = UUID.randomUUID();
+            Task task = buildPendingTask();
+            task.start();
+            task.fail("error");
+
+            when(taskRepository.findById(id)).thenReturn(Optional.of(task));
+            when(taskRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+            taskService.scheduleRetry(id);
+
+            verify(taskEventPort).publish(any(Task.class), eq(TaskEventType.TASK_CREATED));
+        }
+    }
+
+    @Nested
+    @DisplayName("getFailedTasks()")
+    class GetFailedTasks {
+
+        @Test
+        @DisplayName("should return failed tasks from repository")
+        void shouldReturnFailedTasks() {
+            Task failedTask = buildPendingTask();
+            when(taskRepository.findByStatusOrderByUpdatedAtAsc(TaskStatus.FAILED))
+                    .thenReturn(List.of(failedTask));
+
+            List<Task> result = taskService.getFailedTasks();
+
+            assertThat(result).hasSize(1);
+        }
+    }
+
     // =========================================================
     // HELPERS
     // =========================================================

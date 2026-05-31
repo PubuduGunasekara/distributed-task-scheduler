@@ -1,5 +1,7 @@
 package com.taskscheduler.infrastructure.kafka;
 
+import com.taskscheduler.config.KafkaTopicConfig;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import com.taskscheduler.domain.event.TaskEvent;
 import com.taskscheduler.domain.event.TaskEventType;
 import com.taskscheduler.domain.model.Task;
@@ -94,6 +96,34 @@ class TaskEventPublisherTest {
         org.assertj.core.api.Assertions.assertThatCode(
                 () -> publisher.publish(task, TaskEventType.TASK_CREATED)
         ).doesNotThrowAnyException();
+    }
+
+    @Test
+    @DisplayName("should publish dead letter to DLQ topic")
+    void shouldPublishDeadLetterToDlqTopic() {
+        Task task = mockTask();
+        stubKafkaSend();
+
+        publisher.publishDeadLetter(task);
+
+        verify(kafkaTemplate).send(
+                eq(KafkaTopicConfig.TASK_DLQ_TOPIC),
+                anyString(),
+                any(TaskEvent.class)
+        );
+    }
+
+    @Test
+    @DisplayName("should not throw when dead letter Kafka send fails")
+    void shouldNotThrowWhenDeadLetterKafkaFails() {
+        Task task = mockTask();
+        CompletableFuture<SendResult<String, Object>> failedFuture =
+                CompletableFuture.failedFuture(new RuntimeException("Kafka down"));
+        when(kafkaTemplate.send(anyString(), anyString(), any()))
+                .thenReturn(failedFuture);
+
+        assertThatCode(() -> publisher.publishDeadLetter(task))
+                .doesNotThrowAnyException();
     }
 
     // =========================================================

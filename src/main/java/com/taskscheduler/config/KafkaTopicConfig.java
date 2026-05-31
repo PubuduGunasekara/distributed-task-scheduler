@@ -7,5 +7,6 @@ package com.taskscheduler.config;
  */
 public final class KafkaTopicConfig {
     public static final String TASK_EVENTS_TOPIC = "task-events";
+    public static final String TASK_DLQ_TOPIC    = "task-dlq";
     private KafkaTopicConfig() {}
 }

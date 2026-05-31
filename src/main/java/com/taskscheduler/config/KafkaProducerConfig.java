@@ -68,4 +68,12 @@ public class KafkaProducerConfig {
                 .replicas(1)
                 .build();
     }
+
+    @Bean
+    public NewTopic taskDlqTopic() {
+        return TopicBuilder.name(KafkaTopicConfig.TASK_DLQ_TOPIC)
+                .partitions(1)        // DLQ doesn't need parallelism — manual review
+                .replicas(1)
+                .build();
+    }
 }

@@ -20,4 +20,10 @@ import com.taskscheduler.domain.model.Task;
  */
 public interface TaskEventPort {
     void publish(Task task, TaskEventType eventType);
+
+    /**
+     * Publish a task that has exhausted all retries to the dead letter topic.
+     * Dead-lettered tasks require manual inspection and intervention.
+     */
+    void publishDeadLetter(Task task);
 }

@@ -93,9 +93,17 @@ public class TaskService {
         Task task  = getTask(id);
         task.fail(errorMessage);
         Task saved = taskRepository.save(task);
-        taskEventPort.publish(saved, TaskEventType.TASK_FAILED);    // ← ADD
-        log.warn("Task failed: id={} retryCount={} status={} error='{}'",
-                id, saved.getRetryCount(), saved.getStatus(), errorMessage);
+
+        if (saved.getStatus() == TaskStatus.DEAD_LETTER) {
+            log.warn("Task dead-lettered: id={} retryCount={} error='{}'",
+                    id, saved.getRetryCount(), errorMessage);
+            taskEventPort.publishDeadLetter(saved);
+        } else {
+            log.warn("Task failed: id={} retryCount={} status={} error='{}'",
+                    id, saved.getRetryCount(), saved.getStatus(), errorMessage);
+            taskEventPort.publish(saved, TaskEventType.TASK_FAILED);
+        }
+
         return saved;
     }
 
@@ -106,5 +114,25 @@ public class TaskService {
         taskEventPort.publish(saved, TaskEventType.TASK_CANCELLED); // ← ADD
         log.info("Task cancelled: id={}", id);
         return saved;
+    }
+
+    /**
+     * Transitions a FAILED task back to PENDING and re-publishes
+     * a TASK_CREATED event so the worker pool picks it up again.
+     * Called by RetryScheduler after the backoff period elapses.
+     */
+    public Task scheduleRetry(UUID id) {
+        Task task  = getTask(id);
+        task.scheduleRetry();   // FAILED → PENDING
+        Task saved = taskRepository.save(task);
+        taskEventPort.publish(saved, TaskEventType.TASK_CREATED);
+        log.info("Task scheduled for retry: id={} retryCount={}",
+                id, saved.getRetryCount());
+        return saved;
+    }
+
+    @Transactional(readOnly = true)
+    public List<Task> getFailedTasks() {
+        return taskRepository.findByStatusOrderByUpdatedAtAsc(TaskStatus.FAILED);
     }
 }
