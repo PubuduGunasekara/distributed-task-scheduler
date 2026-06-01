@@ -1,0 +1,94 @@
+# ============================================================
+# Production profile — activated with:
+#   --spring.profiles.active=prod
+#   or SPRING_PROFILES_ACTIVE=prod
+#
+# Every secret comes from an environment variable.
+# Nothing sensitive is ever committed to the repository.
+# The ${VAR} syntax fails fast at startup if the var is missing —
+# the app refuses to boot rather than running misconfigured.
+# ============================================================
+
+# This file overrides application.yml for the prod profile.
+# All values here take precedence over base config.
+# Spring Boot always merges profiles — base config provides
+# non-sensitive defaults (timeouts, pool sizes, formats).
+# Secrets are never in application.yml — only here via ${VAR}.
+
+spring:
+  datasource:
+    url:      jdbc:postgresql://${DB_HOST}:${DB_PORT:5432}/${DB_NAME}
+    username: ${DB_USER}
+    password: ${DB_PASSWORD}
+    hikari:
+      # Production connection pool — tuned for sustained load
+      maximum-pool-size: ${DB_POOL_SIZE:20}
+      minimum-idle:      ${DB_POOL_MIN_IDLE:5}
+      connection-timeout: 30000
+      idle-timeout:       600000
+      max-lifetime:       1800000
+
+  data:
+    redis:
+      host:     ${REDIS_HOST}
+      port:     ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      timeout:  2000ms
+      lettuce:
+        pool:
+          max-active: ${REDIS_POOL_MAX:16}
+          max-idle:   8
+          min-idle:   2
+
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS}
+    producer:
+      acks: all                    # wait for all in-sync replicas — durability
+      retries: 3
+      properties:
+        enable.idempotence: true   # exactly-once producer semantics
+    consumer:
+      auto-offset-reset: earliest  # never skip messages on consumer restart
+      enable-auto-commit: false
+    admin:
+      fail-fast: true              # in prod, missing Kafka SHOULD fail startup
+
+  jpa:
+    hibernate:
+      ddl-auto: validate           # never auto-modify schema in production
+    show-sql: false
+    open-in-view: false
+
+# Production logging — structured, less verbose
+logging:
+  level:
+    root: WARN
+    com.taskscheduler: INFO
+    org.springframework.security: WARN
+    org.hibernate.SQL: WARN
+    org.hibernate.type.descriptor.sql: WARN   # suppresses bound parameter values
+    com.zaxxer.hikari: WARN   # suppresses connection pool details
+    org.apache.kafka: WARN
+  pattern:
+    # Include trace context for distributed tracing correlation
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level [%X{traceId:-},%X{spanId:-}] %logger{36} - %msg%n"
+
+# Actuator — expose only what's needed in production
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  endpoint:
+    health:
+      show-details: when-authorized   # don't leak internals to anonymous callers
+  metrics:
+    tags:
+      application: distributed-task-scheduler
+      environment: production
+
+# Rate limiting — production values
+rate-limit:
+  enabled: ${RATE_LIMIT_ENABLED:true}
+  requests-per-window: ${RATE_LIMIT_REQUESTS:60}
+  window-seconds:      ${RATE_LIMIT_WINDOW:60}

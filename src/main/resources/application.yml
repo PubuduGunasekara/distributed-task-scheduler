@@ -6,83 +6,92 @@ spring:
     virtual:
       enabled: true
 
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
+
   jackson:
-    # Serialize Instant as "2026-05-29T10:00:00Z" not as 1748512800.000
-    # Without this, all your Instant fields become Unix timestamps in the API.
     serialization:
       write-dates-as-timestamps: false
 
   mvc:
-    # Enables RFC 7807 Problem Details format for Spring MVC exceptions.
-    # This means MethodArgumentNotValidException → proper ProblemDetail JSON
-    # instead of Spring's default white-label error page.
     problemdetails:
-        enabled: true
+      enabled: true
 
   datasource:
-    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:taskscheduler}
+    url:      jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:taskscheduler}
     username: ${DB_USER:taskscheduler}
     password: ${DB_PASSWORD:taskscheduler}
     hikari:
-      maximum-pool-size: 10
-      minimum-idle: 5
+      maximum-pool-size:  10
+      minimum-idle:       5
       connection-timeout: 30000
-      idle-timeout: 600000
-      max-lifetime: 1800000
-      pool-name: TaskSchedulerPool
+      idle-timeout:       600000
+      max-lifetime:       1800000
+      pool-name:          TaskSchedulerPool
 
   jpa:
     hibernate:
       ddl-auto: validate
-    show-sql: false
+    show-sql:     false
     open-in-view: false
     properties:
       hibernate:
-        dialect: org.hibernate.dialect.PostgreSQLDialect
+        dialect:    org.hibernate.dialect.PostgreSQLDialect
         format_sql: true
 
   flyway:
-    enabled: true
-    locations: classpath:db/migration
+    enabled:             true
+    locations:           classpath:db/migration
     baseline-on-migrate: true
     validate-on-migrate: true
 
   data:
     redis:
-      host: ${REDIS_HOST:localhost}
-      port: ${REDIS_PORT:6379}
+      host:     ${REDIS_HOST:localhost}
+      port:     ${REDIS_PORT:6379}
       password: ${REDIS_PASSWORD:}
       lettuce:
         pool:
           max-active: 10
-          max-idle: 5
-          min-idle: 2
-          max-wait: 2000ms
+          max-idle:   5
+          min-idle:   2
+          max-wait:   2000ms
 
+# Root-level kafka — intentionally NOT under spring:
+# Our KafkaConsumerConfig and KafkaProducerConfig configure
+# deserialization programmatically. Moving this under spring.kafka.*
+# causes Spring Kafka to see BOTH programmatic and property-based
+# configuration simultaneously, which it refuses with:
+# "JsonDeserializer must be configured with property setters,
+#  or via configuration properties; not both"
 kafka:
-    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
-    admin:
-      fail-fast: false
-      operation-timeout: 30
+  bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+  admin:
+    fail-fast:         false
+    operation-timeout: 30
+  properties:
+    request.timeout.ms:     30000
+    default.api.timeout.ms: 30000
+  producer:
+    key-serializer:   org.apache.kafka.common.serialization.StringSerializer
+    value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+    acks:    all
+    retries: 3
     properties:
-      request.timeout.ms: 30000
-      default.api.timeout.ms: 30000
-    producer:
-      key-serializer: org.apache.kafka.common.serialization.StringSerializer
-      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
-      acks: all
-      retries: 3
-      properties:
-        enable.idempotence: true
-        max.in.flight.requests.per.connection: 5
-    consumer:
-      group-id: ${spring.application.name}
-      auto-offset-reset: earliest
-      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
-      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
-      enable-auto-commit: false
-      properties:
-        spring.json.trusted.packages: "com.taskscheduler.*"
+      enable.idempotence:                    true
+      max.in.flight.requests.per.connection: 5
+  consumer:
+    group-id:           ${spring.application.name}
+    auto-offset-reset:  earliest
+    key-deserializer:   org.apache.kafka.common.serialization.StringDeserializer
+    value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+    enable-auto-commit: false
+    properties:
+      spring.json.trusted.packages: "com.taskscheduler.*"
+
+server:
+  port:     ${SERVER_PORT:8080}
+  shutdown: graceful
 
 management:
   health:
@@ -94,7 +103,7 @@ management:
         include: health,info,metrics,prometheus,loggers
   endpoint:
     health:
-      show-details: always
+      show-details:    always
       show-components: always
   metrics:
     tags:
@@ -105,24 +114,15 @@ management:
       percentiles:
         http.server.requests: 0.5, 0.95, 0.99
 
-server:
-  port: ${SERVER_PORT:8080}
-  shutdown: graceful
-
-spring.lifecycle:
-  timeout-per-shutdown-phase: 30s
-
 logging:
   level:
-    root: INFO
+    root:              INFO
     com.taskscheduler: DEBUG
   pattern:
     console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{40} - %msg%n"
 
 # ===== RATE LIMITING =====
 rate-limit:
-  enabled: true
-  # Max task submissions per client per window
-  # Production values: 60/min for standard, 600/min for trusted services
+  enabled:             true
   requests-per-window: 10
-  window-seconds: 60
+  window-seconds:      60
