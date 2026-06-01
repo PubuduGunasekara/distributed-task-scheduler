@@ -6,7 +6,10 @@ import com.taskscheduler.domain.exception.TaskNotFoundException;
 import com.taskscheduler.domain.model.Task;
 import com.taskscheduler.domain.port.DistributedLockPort;
 import com.taskscheduler.domain.service.TaskService;
+import com.taskscheduler.infrastructure.metrics.TaskMetrics;
 import com.taskscheduler.worker.executor.TaskExecutorRegistry;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -37,6 +40,8 @@ public class TaskWorkerService {
     private final TaskService          taskService;
     private final TaskExecutorRegistry executorRegistry;
     private final DistributedLockPort  lockPort;
+    private final TaskMetrics taskMetrics;
+    private final MeterRegistry meterRegistry;
 
     /**
      * Unique identifier for this worker instance.
@@ -55,10 +60,11 @@ public class TaskWorkerService {
 
         // First guard: Redis lock — fast, no DB query
         if (!lockPort.acquireLock(taskId, workerId)) {
-            log.info("Lock unavailable for taskId={} — another worker is processing it",
-                    taskId);
+            taskMetrics.recordLockRejected();
+            log.info("Lock unavailable for taskId={}", taskId);
             return;
         }
+        taskMetrics.recordLockAcquired();
 
         log.info("Lock acquired, processing task: taskId={} worker={}",
                 taskId, workerId);
@@ -81,14 +87,20 @@ public class TaskWorkerService {
     }
 
     private void executeAndFinalize(Task task) {
-        UUID taskId = task.getId();
+        UUID         taskId = task.getId();
+        Timer.Sample sample = Timer.start(meterRegistry);
+
         try {
             executorRegistry.execute(task);
             taskService.completeTask(taskId);
-            log.info("Task completed successfully: taskId={}", taskId);
+            sample.stop(taskMetrics.executionTimer(task.getType()));
+            taskMetrics.recordTaskCompleted(task.getType());          // ← must be here
+            log.info("Task completed: taskId={}", taskId);
+
         } catch (Exception ex) {
-            log.error("Task execution failed: taskId={} error='{}'",
-                    taskId, ex.getMessage(), ex);
+            sample.stop(taskMetrics.executionTimer(task.getType()));
+            taskMetrics.recordTaskFailed(task.getType());             // ← must be here
+            log.error("Task execution failed: taskId={}", taskId, ex);
             taskService.failTask(taskId, ex.getMessage());
         }
     }

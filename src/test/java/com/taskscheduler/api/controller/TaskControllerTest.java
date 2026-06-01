@@ -13,10 +13,13 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
+import com.taskscheduler.infrastructure.metrics.TaskMetrics;
+import com.taskscheduler.domain.model.Task;
+import static org.mockito.Mockito.mock;
 
 import java.time.Instant;
 import java.util.List;
@@ -61,11 +64,15 @@ class TaskControllerTest {
     @Autowired
     private ObjectMapper objectMapper;
 
-    @MockBean
+    @MockitoBean
     private TaskService taskService;
 
-    @MockBean
+    @MockitoBean
     private TaskMapper taskMapper;
+
+    @MockitoBean
+    private TaskMetrics   taskMetrics;
+
 
     // =========================================================
     // POST /api/v1/tasks
@@ -84,9 +91,14 @@ class TaskControllerTest {
             );
             TaskResponse response = buildTaskResponse(TaskStatus.PENDING);
 
+            // Must return a real mock — controller calls saved.getType()
+            // before passing to mapper, so null causes NPE → 500
+            Task mockTask = mock(Task.class);
+            when(mockTask.getType()).thenReturn("EMAIL_SEND");
+
             when(taskService.createTask(any(), any(), any(), anyInt(), any()))
-                    .thenReturn(null); // TaskMapper handles the conversion
-            when(taskMapper.toResponse(any())).thenReturn(response);
+                    .thenReturn(mockTask);                  // ← was thenReturn(null)
+            when(taskMapper.toResponse(mockTask)).thenReturn(response);
 
             mockMvc.perform(post("/api/v1/tasks")
                             .contentType(MediaType.APPLICATION_JSON)

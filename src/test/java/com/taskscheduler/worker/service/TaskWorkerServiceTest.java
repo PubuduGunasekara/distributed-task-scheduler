@@ -7,12 +7,15 @@ import com.taskscheduler.domain.model.Task;
 import com.taskscheduler.domain.model.TaskStatus;
 import com.taskscheduler.domain.port.DistributedLockPort;
 import com.taskscheduler.domain.service.TaskService;
+import com.taskscheduler.infrastructure.metrics.TaskMetrics;
 import com.taskscheduler.worker.executor.TaskExecutorRegistry;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -30,8 +33,20 @@ class TaskWorkerServiceTest {
     @Mock private TaskExecutorRegistry executorRegistry;
     @Mock private DistributedLockPort  lockPort;
 
-    @InjectMocks
-    private TaskWorkerService workerService;
+    // Real instances — MeterRegistry and TaskMetrics cannot be mocked
+    // because Timer.start(registry) calls registry.config() internally,
+    // which returns null on a Mockito mock → NullPointerException.
+    // SimpleMeterRegistry is an in-memory no-op registry — zero I/O.
+    private final MeterRegistry    meterRegistry = new SimpleMeterRegistry();
+    private final TaskMetrics      taskMetrics   = new TaskMetrics(meterRegistry);
+    private       TaskWorkerService workerService;
+
+    @BeforeEach
+    void setUp() {
+        workerService = new TaskWorkerService(
+                taskService, executorRegistry, lockPort, taskMetrics, meterRegistry
+        );
+    }
 
     // =========================================================
     // LOCKING BEHAVIOUR
@@ -204,9 +219,16 @@ class TaskWorkerServiceTest {
     // HELPERS
     // =========================================================
 
+    /**
+     * Minimal task mock — stubs both getId() and getType().
+     * getType() is required because executeAndFinalize() calls
+     * taskMetrics.executionTimer(task.getType()), and
+     * ConcurrentHashMap.computeIfAbsent(null) throws NPE.
+     */
     private Task minimalMock(UUID id) {
         Task task = mock(Task.class);
         when(task.getId()).thenReturn(id);
+        when(task.getType()).thenReturn("EMAIL_SEND");
         return task;
     }
 

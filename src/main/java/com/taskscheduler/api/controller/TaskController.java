@@ -3,7 +3,9 @@ package com.taskscheduler.api.controller;
 import com.taskscheduler.api.dto.CreateTaskRequest;
 import com.taskscheduler.api.dto.TaskResponse;
 import com.taskscheduler.api.mapper.TaskMapper;
+import com.taskscheduler.domain.model.Task;
 import com.taskscheduler.domain.service.TaskService;
+import com.taskscheduler.infrastructure.metrics.TaskMetrics;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -40,6 +42,7 @@ public class TaskController {
 
     private final TaskService taskService;
     private final TaskMapper  taskMapper;
+    private final TaskMetrics taskMetrics;
 
     /**
      * Submit a new task.
@@ -50,15 +53,17 @@ public class TaskController {
     @ResponseStatus(HttpStatus.CREATED)
     public TaskResponse createTask(@Valid @RequestBody CreateTaskRequest request) {
         log.debug("Create task request: name={} type={}", request.name(), request.type());
-        return taskMapper.toResponse(
-                taskService.createTask(
-                        request.name(),
-                        request.type(),
-                        request.payload(),
-                        request.priority(),
-                        request.scheduledAt()
-                )
+
+        Task saved = taskService.createTask(       // ← capture in variable first
+                request.name(),
+                request.type(),
+                request.payload(),
+                request.priority(),
+                request.scheduledAt()
         );
+        taskMetrics.recordTaskCreated(saved.getType());
+
+        return taskMapper.toResponse(saved);
     }
 
     /**

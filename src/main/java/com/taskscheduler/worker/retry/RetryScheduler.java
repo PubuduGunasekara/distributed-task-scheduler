@@ -2,6 +2,7 @@ package com.taskscheduler.worker.retry;
 
 import com.taskscheduler.domain.model.Task;
 import com.taskscheduler.domain.service.TaskService;
+import com.taskscheduler.infrastructure.metrics.TaskMetrics;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -38,6 +39,7 @@ import java.util.List;
 public class RetryScheduler {
 
     private final TaskService taskService;
+    private final TaskMetrics taskMetrics;
 
     @Scheduled(fixedDelay = 30_000, initialDelay = 30_000)
     public void processRetries() {
@@ -54,6 +56,7 @@ public class RetryScheduler {
             if (RetryPolicy.isEligibleForRetry(task)) {
                 try {
                     taskService.scheduleRetry(task.getId());
+                    taskMetrics.recordRetryScheduled();
                     scheduled++;
                 } catch (Exception ex) {
                     // Log and continue — one broken task must not block others
