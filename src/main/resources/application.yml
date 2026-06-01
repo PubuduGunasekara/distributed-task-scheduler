@@ -118,3 +118,11 @@ logging:
     com.taskscheduler: DEBUG
   pattern:
     console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{40} - %msg%n"
+
+# ===== RATE LIMITING =====
+rate-limit:
+  enabled: true
+  # Max task submissions per client per window
+  # Production values: 60/min for standard, 600/min for trusted services
+  requests-per-window: 10
+  window-seconds: 60

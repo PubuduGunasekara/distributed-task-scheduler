@@ -4,7 +4,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.taskscheduler.api.dto.CreateTaskRequest;
 import com.taskscheduler.api.dto.TaskResponse;
 import com.taskscheduler.api.exception.GlobalExceptionHandler;
+import com.taskscheduler.api.interceptor.RateLimitInterceptor;
 import com.taskscheduler.api.mapper.TaskMapper;
+import com.taskscheduler.config.RateLimitConfig;
 import com.taskscheduler.domain.exception.TaskNotFoundException;
 import com.taskscheduler.domain.model.TaskStatus;
 import com.taskscheduler.domain.service.TaskService;
@@ -13,6 +15,8 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.context.annotation.ComponentScan;
+import org.springframework.context.annotation.FilterType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
@@ -53,25 +57,22 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *   - Business logic (that's TaskServiceTest)
  *   - Database queries (that's TaskRepositoryTest)
  */
-@WebMvcTest(TaskController.class)
+@WebMvcTest(controllers = TaskController.class,
+        // Rate limiting is a global HandlerInterceptor / WebMvcConfigurer, so
+        // @WebMvcTest would otherwise drag it (and its Redis + MeterRegistry deps)
+        // into this slice. These tests cover the controller contract only — exclude it.
+        excludeFilters = @ComponentScan.Filter(
+                type = FilterType.ASSIGNABLE_TYPE,
+                classes = {RateLimitInterceptor.class, RateLimitConfig.class}))
 @Import(GlobalExceptionHandler.class)
 @DisplayName("TaskController")
 class TaskControllerTest {
 
-    @Autowired
-    private MockMvc mockMvc;
-
-    @Autowired
-    private ObjectMapper objectMapper;
-
-    @MockitoBean
-    private TaskService taskService;
-
-    @MockitoBean
-    private TaskMapper taskMapper;
-
-    @MockitoBean
-    private TaskMetrics   taskMetrics;
+    @Autowired   private MockMvc      mockMvc;
+    @Autowired   private ObjectMapper objectMapper;
+    @MockitoBean private TaskService  taskService;
+    @MockitoBean private TaskMapper   taskMapper;
+    @MockitoBean private TaskMetrics  taskMetrics;
 
 
     // =========================================================
