@@ -1,0 +1,30 @@
+# Build output — not needed, multi-stage copies the JAR directly
+target/
+
+# Git history — never needed in image
+.git/
+.github/
+
+# IDE files
+.idea/
+*.iml
+
+# OS artifacts
+.DS_Store
+Thumbs.db
+
+# Docker compose and dev infra — production image doesn't need these
+docker/
+docker-compose.yml
+docker-compose.override.yml
+
+# Docs
+*.md
+HELP.md
+
+# Env files — secrets must never end up in image
+.env
+.env.*
+
+# Test source — stripped from production image
+# (src/test is excluded by maven -DskipTests but keep context clean)
