@@ -35,9 +35,14 @@ import org.springframework.stereotype.Component;
  *    production solution — noted for a future milestone.
  *
  * 3. Log on failure, don't rethrow
- *    If Kafka is temporarily down, we log the failure.
- *    The task is already saved in PostgreSQL.
- *    M6 will add proper retry and dead-letter handling.
+ *    If Kafka is temporarily down, we log the failure and move on.
+ *    This is safe because task state lives in PostgreSQL, not in the
+ *    event stream: a lost publish here doesn't lose the task. FAILED
+ *    tasks are picked up by RetryScheduler regardless of whether this
+ *    publish succeeded, and StaleTaskRecoveryScheduler re-publishes
+ *    TASK_CREATED for any PENDING task whose event never landed. A lost
+ *    publishDeadLetter() only loses the task-dlq notification — the
+ *    task itself is still correctly marked DEAD_LETTER in the database.
  */
 @Slf4j
 @Component

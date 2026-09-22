@@ -94,12 +94,12 @@ public class TaskWorkerService {
             executorRegistry.execute(task);
             taskService.completeTask(taskId);
             sample.stop(taskMetrics.executionTimer(task.getType()));
-            taskMetrics.recordTaskCompleted(task.getType());          // ← must be here
+            taskMetrics.recordTaskCompleted(task.getType());
             log.info("Task completed: taskId={}", taskId);
 
         } catch (Exception ex) {
             sample.stop(taskMetrics.executionTimer(task.getType()));
-            taskMetrics.recordTaskFailed(task.getType());             // ← must be here
+            taskMetrics.recordTaskFailed(task.getType());
             log.error("Task execution failed: taskId={}", taskId, ex);
             taskService.failTask(taskId, ex.getMessage());
         }

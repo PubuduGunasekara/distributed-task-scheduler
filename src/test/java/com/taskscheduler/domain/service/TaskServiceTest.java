@@ -139,7 +139,7 @@ class TaskServiceTest {
 
             assertThat(result.getStatus()).isEqualTo(TaskStatus.PENDING);
             verify(taskRepository, times(1)).save(any(Task.class));
-            verify(taskEventPort, times(1))                          // ← ADD
+            verify(taskEventPort, times(1))
                     .publish(any(Task.class), eq(TaskEventType.TASK_CREATED));
         }
 

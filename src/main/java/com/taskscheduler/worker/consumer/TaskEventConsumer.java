@@ -21,10 +21,14 @@ import org.springframework.stereotype.Component;
  * no Kafka infrastructure needed in unit tests.
  *
  * Ack strategy:
- *   Success   → ack() commits the offset. Message won't be redelivered.
- *   Exception → ack() still called after logging.
- *               Task is in FAILED state in DB; M6 schedules retries.
- *               Not acking would cause infinite redelivery in local dev.
+ *   Offsets are always committed after processing, success or failure.
+ *   Correctness never depends on redelivery: task state lives in
+ *   PostgreSQL, not in the Kafka offset. A FAILED task is picked up by
+ *   RetryScheduler once its backoff elapses, and StaleTaskRecoveryScheduler
+ *   independently times out tasks stuck RUNNING and re-publishes
+ *   TASK_CREATED for PENDING tasks whose event never reached a worker.
+ *   Not acking on exception would cause infinite redelivery for the same
+ *   broken event instead of letting those schedulers recover it properly.
  *
  * Each @KafkaListener method runs on its own consumer thread.
  * With concurrency=3, three instances of this listener run in parallel,
@@ -55,12 +59,11 @@ public class TaskEventConsumer {
         try {
             workerService.process(event);
         } catch (Exception ex) {
-            // Unexpected error — log and ack to avoid infinite loop.
-            // M6 adds structured retry and dead-letter queue.
+            // Unexpected error — log and ack to avoid infinite redelivery
+            // of the same broken event. See the class-level ack strategy.
             log.error("Unexpected error processing event: eventType={} taskId={}",
                     event.eventType(), event.taskId(), ex);
         } finally {
-            // Always ack in M4. M6 replaces this with conditional ack/nack.
             ack.acknowledge();
         }
     }
