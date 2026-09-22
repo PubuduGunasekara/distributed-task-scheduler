@@ -103,6 +103,44 @@ class RetryPolicyTest {
         }
     }
 
+    @Nested
+    @DisplayName("full retry lifecycle")
+    class FullRetryLifecycle {
+
+        @Test
+        @DisplayName("should back off 10s / 30s / 90s before dead-lettering on the 4th failure")
+        void shouldFollowFullBackoffScheduleBeforeDeadLettering() {
+            Task task = Task.create("test-task", "EMAIL_SEND", "{}", 5, Instant.now());
+
+            task.start();
+            task.fail("attempt 1 failed");
+            assertThat(task.getStatus()).isEqualTo(TaskStatus.FAILED);
+            assertThat(task.getRetryCount()).isEqualTo(1);
+            assertThat(RetryPolicy.backoffFor(task.getRetryCount())).isEqualTo(Duration.ofSeconds(10));
+
+            task.scheduleRetry();
+            task.start();
+            task.fail("attempt 2 failed");
+            assertThat(task.getStatus()).isEqualTo(TaskStatus.FAILED);
+            assertThat(task.getRetryCount()).isEqualTo(2);
+            assertThat(RetryPolicy.backoffFor(task.getRetryCount())).isEqualTo(Duration.ofSeconds(30));
+
+            task.scheduleRetry();
+            task.start();
+            task.fail("attempt 3 failed");
+            assertThat(task.getStatus()).isEqualTo(TaskStatus.FAILED);
+            assertThat(task.getRetryCount()).isEqualTo(3);
+            assertThat(RetryPolicy.backoffFor(task.getRetryCount())).isEqualTo(Duration.ofSeconds(90));
+
+            task.scheduleRetry();
+            task.start();
+            task.fail("attempt 4 failed");
+            assertThat(task.getStatus()).isEqualTo(TaskStatus.DEAD_LETTER);
+            assertThat(task.getRetryCount()).isEqualTo(4);
+            assertThat(task.getFailedAt()).isNotNull();
+        }
+    }
+
     // =========================================================
     // HELPERS
     // =========================================================

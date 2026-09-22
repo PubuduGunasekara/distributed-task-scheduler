@@ -316,8 +316,8 @@ class TaskServiceTest {
             UUID id   = UUID.randomUUID();
             Task task = buildPendingTask();
 
-            // Exhaust retries: max=3, so fail 3 times
-            for (int i = 0; i < 2; i++) {
+            // maxRetries=3 → initial attempt + 3 retries; exhaust the first 3 failures
+            for (int i = 0; i < 3; i++) {
                 task.start();
                 task.fail("error " + i);
                 if (task.getStatus() == TaskStatus.FAILED) {
@@ -325,7 +325,7 @@ class TaskServiceTest {
                 }
             }
             task.start(); // Start the final attempt
-            // One more fail will push retryCount to 3 = maxRetries → DEAD_LETTER
+            // One more fail pushes retryCount to 4, exceeding maxRetries=3 → DEAD_LETTER
 
             when(taskRepository.findById(id)).thenReturn(Optional.of(task));
             when(taskRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));

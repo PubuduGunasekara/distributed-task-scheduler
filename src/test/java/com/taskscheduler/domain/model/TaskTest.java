@@ -147,8 +147,10 @@ class TaskTest {
         @Test
         @DisplayName("should transition to DEAD_LETTER when retries exhausted")
         void shouldTransitionToDeadLetterWhenExhausted() {
+            // maxRetries=3 means initial attempt + 3 retries: the 4th
+            // failure (retryCount exceeding maxRetries) dead-letters.
             Task task = buildTask();
-            for (int i = 0; i < 3; i++) {
+            for (int i = 0; i < 4; i++) {
                 task.start();
                 task.fail("error " + i);
                 if (task.getStatus() == TaskStatus.FAILED) {
@@ -156,7 +158,24 @@ class TaskTest {
                 }
             }
             assertThat(task.getStatus()).isEqualTo(TaskStatus.DEAD_LETTER);
+            assertThat(task.getRetryCount()).isEqualTo(4);
             assertThat(task.getFailedAt()).isNotNull();
+        }
+
+        @Test
+        @DisplayName("should stay FAILED (not dead-letter) on the 3rd failure")
+        void shouldStayFailedOnThirdFailure() {
+            Task task = buildTask();
+            for (int i = 0; i < 2; i++) {
+                task.start();
+                task.fail("error " + i);
+                task.scheduleRetry();
+            }
+            task.start();
+            task.fail("error 2");
+
+            assertThat(task.getStatus()).isEqualTo(TaskStatus.FAILED);
+            assertThat(task.getRetryCount()).isEqualTo(3);
         }
 
         @Test

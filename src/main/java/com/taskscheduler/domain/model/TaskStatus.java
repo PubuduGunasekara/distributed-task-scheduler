@@ -19,7 +19,7 @@ public enum TaskStatus {
     /** Finished successfully. Terminal. */
     COMPLETED,
 
-    /** Execution failed. Will retry if retryCount < maxRetries. */
+    /** Execution failed. Will retry if retryCount <= maxRetries (see Task.fail()). */
     FAILED,
 
     /** Exhausted all retries. Requires manual intervention. Terminal. */
