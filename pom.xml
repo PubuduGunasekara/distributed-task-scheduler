@@ -241,7 +241,6 @@
 								<exclude>com/taskscheduler/domain/model/**</exclude>
 								<exclude>com/taskscheduler/api/**</exclude>
 								<exclude>com/taskscheduler/worker/executor/**</exclude>
-								<exclude>com/taskscheduler/infrastructure/redis/**</exclude>
 							</excludes>
 						</configuration>
 					</execution>
