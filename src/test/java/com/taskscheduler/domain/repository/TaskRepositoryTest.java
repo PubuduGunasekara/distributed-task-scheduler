@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
+import org.springframework.boot.test.autoconfigure.orm.jpa.TestEntityManager;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -61,9 +62,36 @@ class TaskRepositoryTest {
     @Autowired
     private TaskRepository taskRepository;
 
+    @Autowired
+    private TestEntityManager entityManager;
+
     @BeforeEach
     void cleanDatabase() {
         taskRepository.deleteAll();
+    }
+
+    /**
+     * Task exposes no setter for startedAt/updatedAt — they're only ever
+     * set to Instant.now() by the state-machine methods. Recovery-scheduler
+     * queries filter on "older than N minutes," which start()/save() can't
+     * produce, so tests backdate the column directly via a bulk update.
+     */
+    private void backdateStartedAt(Task task, Instant startedAt) {
+        entityManager.getEntityManager()
+                .createQuery("UPDATE Task t SET t.startedAt = :ts WHERE t.id = :id")
+                .setParameter("ts", startedAt)
+                .setParameter("id", task.getId())
+                .executeUpdate();
+        entityManager.clear();
+    }
+
+    private void backdateUpdatedAt(Task task, Instant updatedAt) {
+        entityManager.getEntityManager()
+                .createQuery("UPDATE Task t SET t.updatedAt = :ts WHERE t.id = :id")
+                .setParameter("ts", updatedAt)
+                .setParameter("id", task.getId())
+                .executeUpdate();
+        entityManager.clear();
     }
 
     @Nested
@@ -183,6 +211,117 @@ class TaskRepositoryTest {
 
             assertThat(taskRepository.countByStatus(TaskStatus.PENDING)).isEqualTo(2);
             assertThat(taskRepository.countByStatus(TaskStatus.RUNNING)).isEqualTo(1);
+        }
+    }
+
+    @Nested
+    @DisplayName("findStaleRunningTasks()")
+    class FindStaleRunningTasks {
+
+        @Test
+        @DisplayName("should return RUNNING tasks started before the cutoff")
+        void shouldReturnTasksStartedBeforeCutoff() {
+            Task task = buildTask(Instant.now().minusSeconds(600));
+            task.start();
+            task = taskRepository.saveAndFlush(task);
+            backdateStartedAt(task, Instant.now().minusSeconds(600));
+
+            List<Task> result = taskRepository.findStaleRunningTasks(
+                    TaskStatus.RUNNING, Instant.now().minusSeconds(300), PageRequest.of(0, 10));
+
+            assertThat(result).hasSize(1);
+        }
+
+        @Test
+        @DisplayName("should NOT return RUNNING tasks started after the cutoff")
+        void shouldExcludeTasksWithinTimeout() {
+            Task task = buildTask(Instant.now().minusSeconds(600));
+            task.start();
+            taskRepository.saveAndFlush(task);
+
+            List<Task> result = taskRepository.findStaleRunningTasks(
+                    TaskStatus.RUNNING, Instant.now().minusSeconds(3600), PageRequest.of(0, 10));
+
+            assertThat(result).isEmpty();
+        }
+
+        @Test
+        @DisplayName("should NOT return PENDING tasks")
+        void shouldExcludePendingTasks() {
+            taskRepository.save(buildTask(Instant.now().minusSeconds(600)));
+
+            List<Task> result = taskRepository.findStaleRunningTasks(
+                    TaskStatus.RUNNING, Instant.now(), PageRequest.of(0, 10));
+
+            assertThat(result).isEmpty();
+        }
+
+        @Test
+        @DisplayName("should respect page size limit")
+        void shouldRespectPageLimit() {
+            for (int i = 0; i < 5; i++) {
+                Task task = buildTask(Instant.now().minusSeconds(600));
+                task.start();
+                task = taskRepository.saveAndFlush(task);
+                backdateStartedAt(task, Instant.now().minusSeconds(600));
+            }
+
+            List<Task> result = taskRepository.findStaleRunningTasks(
+                    TaskStatus.RUNNING, Instant.now(), PageRequest.of(0, 3));
+
+            assertThat(result).hasSize(3);
+        }
+    }
+
+    @Nested
+    @DisplayName("findOrphanedPendingTasks()")
+    class FindOrphanedPendingTasks {
+
+        @Test
+        @DisplayName("should return due PENDING tasks not updated since the cutoff")
+        void shouldReturnDueOrphanedTasks() {
+            Task task = taskRepository.saveAndFlush(buildTask(Instant.now().minusSeconds(600)));
+            backdateUpdatedAt(task, Instant.now().minusSeconds(600));
+
+            List<Task> result = taskRepository.findOrphanedPendingTasks(
+                    TaskStatus.PENDING, Instant.now(), Instant.now().minusSeconds(60), PageRequest.of(0, 10));
+
+            assertThat(result).hasSize(1);
+        }
+
+        @Test
+        @DisplayName("should NOT return tasks updated after the cutoff")
+        void shouldExcludeRecentlyUpdatedTasks() {
+            taskRepository.saveAndFlush(buildTask(Instant.now().minusSeconds(600)));
+
+            List<Task> result = taskRepository.findOrphanedPendingTasks(
+                    TaskStatus.PENDING, Instant.now(), Instant.now().minusSeconds(3600), PageRequest.of(0, 10));
+
+            assertThat(result).isEmpty();
+        }
+
+        @Test
+        @DisplayName("should NOT return tasks that are not yet due")
+        void shouldExcludeNotYetDueTasks() {
+            taskRepository.saveAndFlush(buildTask(Instant.now().plusSeconds(3600)));
+
+            List<Task> result = taskRepository.findOrphanedPendingTasks(
+                    TaskStatus.PENDING, Instant.now(), Instant.now().minusSeconds(60), PageRequest.of(0, 10));
+
+            assertThat(result).isEmpty();
+        }
+
+        @Test
+        @DisplayName("should NOT return RUNNING tasks")
+        void shouldExcludeRunningTasks() {
+            Task task = buildTask(Instant.now().minusSeconds(600));
+            task.start();
+            taskRepository.saveAndFlush(task);
+
+            List<Task> result = taskRepository.findOrphanedPendingTasks(
+                    TaskStatus.PENDING, Instant.now(), Instant.now().minusSeconds(60), PageRequest.of(0, 10));
+
+            assertThat(result).isEmpty();
         }
     }
 

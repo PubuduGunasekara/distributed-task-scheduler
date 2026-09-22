@@ -143,14 +143,22 @@ public class Task {
         this.updatedAt   = Instant.now();
     }
 
-    /** RUNNING → FAILED (retryable) or RUNNING → DEAD_LETTER (exhausted) */
+    /**
+     * RUNNING → FAILED (retryable) or RUNNING → DEAD_LETTER (exhausted)
+     *
+     * maxRetries is the number of retries AFTER the initial attempt, so a
+     * task gets 1 + maxRetries total attempts before dead-lettering:
+     * with the default maxRetries=3, failures 1-3 land in FAILED
+     * (backoff 10s / 30s / 90s via RetryPolicy) and only the 4th
+     * failure — retryCount exceeding maxRetries — dead-letters.
+     */
     public void fail(String errorMessage) {
         requireStatus(TaskStatus.RUNNING, "fail");
         this.retryCount++;
         this.errorMessage = errorMessage;
         this.updatedAt    = Instant.now();
 
-        if (this.retryCount >= this.maxRetries) {
+        if (this.retryCount > this.maxRetries) {
             this.status   = TaskStatus.DEAD_LETTER;
             this.failedAt = Instant.now();
         } else {
@@ -176,6 +184,12 @@ public class Task {
     // QUERY METHODS
     // =========================================================
 
+    /**
+     * True if a subsequent fail() would land in FAILED rather than
+     * DEAD_LETTER. Mirrors fail()'s condition exactly: fail() dead-letters
+     * when retryCount (after increment) > maxRetries, i.e. when the
+     * current retryCount is already >= maxRetries.
+     */
     public boolean isRetryable() {
         return retryCount < maxRetries;
     }

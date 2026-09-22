@@ -80,6 +80,20 @@ public class TaskMetrics {
                 .increment();
     }
 
+    public void recordTaskRecoveredFromTimeout() {
+        Counter.builder("tasks.recovered.timeout.total")
+                .description("Stuck RUNNING tasks failed by the recovery scheduler after execution timeout")
+                .register(registry)
+                .increment();
+    }
+
+    public void recordOrphanTaskRepublished() {
+        Counter.builder("tasks.republished.orphan.total")
+                .description("Orphaned PENDING tasks re-published by the recovery scheduler")
+                .register(registry)
+                .increment();
+    }
+
     // =========================================================
     // EXECUTION TIMER
     // =========================================================

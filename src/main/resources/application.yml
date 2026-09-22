@@ -126,3 +126,13 @@ rate-limit:
   enabled:             true
   requests-per-window: 10
   window-seconds:      60
+
+# ===== STALE-TASK RECOVERY =====
+# execution-timeout must exceed the Redis lock TTL (30s, RedisDistributedLock.LOCK_TTL)
+# or the scheduler could fail a task that's still legitimately running.
+scheduler:
+  recovery:
+    poll-interval:     60s
+    execution-timeout: 5m
+    orphan-threshold:  2m
+    batch-size:        100

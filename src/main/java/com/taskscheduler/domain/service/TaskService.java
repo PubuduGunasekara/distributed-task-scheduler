@@ -44,7 +44,7 @@ public class TaskService {
     ) {
         Task task  = Task.create(name, type, payload, priority, scheduledAt);
         Task saved = taskRepository.save(task);
-        taskEventPort.publish(saved, TaskEventType.TASK_CREATED);   // ← ADD
+        taskEventPort.publish(saved, TaskEventType.TASK_CREATED);
         log.info("Task created: id={} name='{}' type={} priority={} scheduledAt={}",
                 saved.getId(), saved.getName(), saved.getType(),
                 saved.getPriority(), saved.getScheduledAt());
@@ -75,7 +75,7 @@ public class TaskService {
         Task task  = getTask(id);
         task.start();
         Task saved = taskRepository.save(task);
-        taskEventPort.publish(saved, TaskEventType.TASK_STARTED);   // ← ADD
+        taskEventPort.publish(saved, TaskEventType.TASK_STARTED);
         log.info("Task started: id={}", id);
         return saved;
     }
@@ -84,7 +84,7 @@ public class TaskService {
         Task task  = getTask(id);
         task.complete();
         Task saved = taskRepository.save(task);
-        taskEventPort.publish(saved, TaskEventType.TASK_COMPLETED); // ← ADD
+        taskEventPort.publish(saved, TaskEventType.TASK_COMPLETED);
         log.info("Task completed: id={}", id);
         return saved;
     }
@@ -111,7 +111,7 @@ public class TaskService {
         Task task  = getTask(id);
         task.cancel();
         Task saved = taskRepository.save(task);
-        taskEventPort.publish(saved, TaskEventType.TASK_CANCELLED); // ← ADD
+        taskEventPort.publish(saved, TaskEventType.TASK_CANCELLED);
         log.info("Task cancelled: id={}", id);
         return saved;
     }
@@ -134,5 +134,29 @@ public class TaskService {
     @Transactional(readOnly = true)
     public List<Task> getFailedTasks() {
         return taskRepository.findByStatusOrderByUpdatedAtAsc(TaskStatus.FAILED);
+    }
+
+    @Transactional(readOnly = true)
+    public List<Task> getStaleRunningTasks(Instant cutoff, int limit) {
+        return taskRepository.findStaleRunningTasks(
+                TaskStatus.RUNNING, cutoff, PageRequest.of(0, limit));
+    }
+
+    @Transactional(readOnly = true)
+    public List<Task> getOrphanedPendingTasks(Instant now, Instant cutoff, int limit) {
+        return taskRepository.findOrphanedPendingTasks(
+                TaskStatus.PENDING, now, cutoff, PageRequest.of(0, limit));
+    }
+
+    /**
+     * Re-publishes TASK_CREATED for a task that is still PENDING.
+     * Does not touch task state — the task was never actually consumed,
+     * so there's nothing to transition. Used by the recovery scheduler
+     * when a TASK_CREATED event is presumed lost.
+     */
+    public void republishOrphanedTask(UUID id) {
+        Task task = getTask(id);
+        taskEventPort.publish(task, TaskEventType.TASK_CREATED);
+        log.info("Orphaned task re-published: id={} retryCount={}", id, task.getRetryCount());
     }
 }
