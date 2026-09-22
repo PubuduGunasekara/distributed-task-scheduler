@@ -31,10 +31,47 @@ public interface TaskRepository extends JpaRepository<Task, UUID> {
             Pageable pageable
     );
 
-    /** Used by retry scheduler (Milestone 6). */
+    /** Used by the retry scheduler to find FAILED tasks waiting on backoff. */
     List<Task> findByStatusOrderByUpdatedAtAsc(TaskStatus status);
 
-    /** Used by metrics and Grafana dashboards (Milestone 7). */
+    /** Used by metrics and Grafana dashboards. */
     @Query("SELECT COUNT(t) FROM Task t WHERE t.status = :status")
     long countByStatus(@Param("status") TaskStatus status);
+
+    /**
+     * Used by the stale-task recovery scheduler.
+     * Finds RUNNING tasks whose startedAt predates the execution timeout —
+     * the worker that claimed them is presumed dead.
+     * Oldest first, so the longest-stuck tasks recover first.
+     */
+    @Query("""
+            SELECT t FROM Task t
+            WHERE t.status = :status
+              AND t.startedAt < :cutoff
+            ORDER BY t.startedAt ASC
+            """)
+    List<Task> findStaleRunningTasks(
+            @Param("status") TaskStatus status,
+            @Param("cutoff") Instant cutoff,
+            Pageable pageable
+    );
+
+    /**
+     * Used by the stale-task recovery scheduler.
+     * Finds PENDING tasks that are due but haven't been touched since before
+     * the orphan threshold — a TASK_CREATED event for them was likely lost.
+     */
+    @Query("""
+            SELECT t FROM Task t
+            WHERE t.status = :status
+              AND t.scheduledAt <= :now
+              AND t.updatedAt < :cutoff
+            ORDER BY t.updatedAt ASC
+            """)
+    List<Task> findOrphanedPendingTasks(
+            @Param("status") TaskStatus status,
+            @Param("now") Instant now,
+            @Param("cutoff") Instant cutoff,
+            Pageable pageable
+    );
 }
