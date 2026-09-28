@@ -167,6 +167,8 @@ curl -X POST http://localhost:8080/api/v1/tasks \
   }'
 ```
 
+A future `scheduledAt` genuinely defers execution — the task is saved as PENDING and only dispatched once that time arrives, instead of running immediately.
+
 ---
 
 ## Project Structure
