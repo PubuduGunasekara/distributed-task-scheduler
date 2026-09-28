@@ -127,10 +127,16 @@ rate-limit:
   requests-per-window: 10
   window-seconds:      60
 
+# ===== DUE-TASK DISPATCH =====
+# Primary dispatch mechanism for tasks created with a future scheduledAt.
+scheduler:
+  dispatch:
+    poll-interval: 5s
+    batch-size:    100
+
 # ===== STALE-TASK RECOVERY =====
 # execution-timeout must exceed the Redis lock TTL (30s, RedisDistributedLock.LOCK_TTL)
 # or the scheduler could fail a task that's still legitimately running.
-scheduler:
   recovery:
     poll-interval:     60s
     execution-timeout: 5m

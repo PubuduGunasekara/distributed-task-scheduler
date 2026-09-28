@@ -42,7 +42,7 @@ class StaleTaskRecoverySchedulerTest {
     void setUp() {
         scheduler = new StaleTaskRecoveryScheduler(taskService, taskMetrics, properties);
         lenient().when(taskService.getStaleRunningTasks(any(), anyInt())).thenReturn(List.of());
-        lenient().when(taskService.getOrphanedPendingTasks(any(), any(), anyInt())).thenReturn(List.of());
+        lenient().when(taskService.getOrphanedPendingTasks(any(), anyInt())).thenReturn(List.of());
     }
 
     // =========================================================
@@ -115,12 +115,12 @@ class StaleTaskRecoverySchedulerTest {
                     Duration.ofSeconds(60), Duration.ofMinutes(5), Duration.ofMinutes(2), 5);
             scheduler = new StaleTaskRecoveryScheduler(taskService, taskMetrics, smallBatch);
             when(taskService.getStaleRunningTasks(any(), anyInt())).thenReturn(List.of());
-            when(taskService.getOrphanedPendingTasks(any(), any(), anyInt())).thenReturn(List.of());
+            when(taskService.getOrphanedPendingTasks(any(), anyInt())).thenReturn(List.of());
 
             scheduler.recoverStaleTasks();
 
             verify(taskService).getStaleRunningTasks(any(), eq(5));
-            verify(taskService).getOrphanedPendingTasks(any(), any(), eq(5));
+            verify(taskService).getOrphanedPendingTasks(any(), eq(5));
         }
     }
 
@@ -137,7 +137,7 @@ class StaleTaskRecoverySchedulerTest {
         void shouldRepublishOrphan() {
             UUID id = UUID.randomUUID();
             Task task = taskWithId(id);
-            when(taskService.getOrphanedPendingTasks(any(), any(), eq(100)))
+            when(taskService.getOrphanedPendingTasks(any(), eq(100)))
                     .thenReturn(List.of(task));
 
             scheduler.recoverStaleTasks();
@@ -160,7 +160,7 @@ class StaleTaskRecoverySchedulerTest {
             UUID id2 = UUID.randomUUID();
             Task task1 = taskWithId(id1);
             Task task2 = taskWithId(id2);
-            when(taskService.getOrphanedPendingTasks(any(), any(), eq(100)))
+            when(taskService.getOrphanedPendingTasks(any(), eq(100)))
                     .thenReturn(List.of(task1, task2));
             doThrow(new ObjectOptimisticLockingFailureException(Task.class, id1))
                     .when(taskService).republishOrphanedTask(id1);
@@ -178,7 +178,7 @@ class StaleTaskRecoverySchedulerTest {
             UUID id2 = UUID.randomUUID();
             Task task1 = taskWithId(id1);
             Task task2 = taskWithId(id2);
-            when(taskService.getOrphanedPendingTasks(any(), any(), eq(100)))
+            when(taskService.getOrphanedPendingTasks(any(), eq(100)))
                     .thenReturn(List.of(task1, task2));
             doThrow(new IllegalStateException("not PENDING"))
                     .when(taskService).republishOrphanedTask(id1);

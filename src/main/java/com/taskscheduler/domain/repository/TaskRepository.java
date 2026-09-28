@@ -57,21 +57,41 @@ public interface TaskRepository extends JpaRepository<Task, UUID> {
     );
 
     /**
-     * Used by the stale-task recovery scheduler.
-     * Finds PENDING tasks that are due but haven't been touched since before
-     * the orphan threshold — a TASK_CREATED event for them was likely lost.
+     * Used by the stale-task recovery scheduler's orphan sweep.
+     * Finds PENDING tasks that WERE dispatched (dispatchedAt set) but not
+     * since before the orphan threshold — their TASK_CREATED event was
+     * likely lost after publishing. Tasks never dispatched at all are
+     * findUndispatchedDueTasks()'s job, not this one's.
      */
     @Query("""
             SELECT t FROM Task t
             WHERE t.status = :status
-              AND t.scheduledAt <= :now
-              AND t.updatedAt < :cutoff
-            ORDER BY t.updatedAt ASC
+              AND t.dispatchedAt IS NOT NULL
+              AND t.dispatchedAt < :cutoff
+            ORDER BY t.dispatchedAt ASC
             """)
     List<Task> findOrphanedPendingTasks(
             @Param("status") TaskStatus status,
-            @Param("now") Instant now,
             @Param("cutoff") Instant cutoff,
+            Pageable pageable
+    );
+
+    /**
+     * Used by DueTaskDispatchScheduler — the primary dispatch mechanism.
+     * Finds PENDING tasks that are due and have never been dispatched
+     * (dispatchedAt IS NULL), whether created already-due or created for
+     * the future and now due.
+     */
+    @Query("""
+            SELECT t FROM Task t
+            WHERE t.status = :status
+              AND t.dispatchedAt IS NULL
+              AND t.scheduledAt <= :now
+            ORDER BY t.scheduledAt ASC
+            """)
+    List<Task> findUndispatchedDueTasks(
+            @Param("status") TaskStatus status,
+            @Param("now") Instant now,
             Pageable pageable
     );
 }

@@ -85,10 +85,10 @@ class TaskRepositoryTest {
         entityManager.clear();
     }
 
-    private void backdateUpdatedAt(Task task, Instant updatedAt) {
+    private void backdateDispatchedAt(Task task, Instant dispatchedAt) {
         entityManager.getEntityManager()
-                .createQuery("UPDATE Task t SET t.updatedAt = :ts WHERE t.id = :id")
-                .setParameter("ts", updatedAt)
+                .createQuery("UPDATE Task t SET t.dispatchedAt = :ts WHERE t.id = :id")
+                .setParameter("ts", dispatchedAt)
                 .setParameter("id", task.getId())
                 .executeUpdate();
         entityManager.clear();
@@ -278,35 +278,39 @@ class TaskRepositoryTest {
     class FindOrphanedPendingTasks {
 
         @Test
-        @DisplayName("should return due PENDING tasks not updated since the cutoff")
-        void shouldReturnDueOrphanedTasks() {
-            Task task = taskRepository.saveAndFlush(buildTask(Instant.now().minusSeconds(600)));
-            backdateUpdatedAt(task, Instant.now().minusSeconds(600));
+        @DisplayName("should return PENDING tasks dispatched before the cutoff")
+        void shouldReturnStaleDispatchedTasks() {
+            Task task = buildTask(Instant.now().minusSeconds(600));
+            task.markDispatched();
+            task = taskRepository.saveAndFlush(task);
+            backdateDispatchedAt(task, Instant.now().minusSeconds(600));
 
             List<Task> result = taskRepository.findOrphanedPendingTasks(
-                    TaskStatus.PENDING, Instant.now(), Instant.now().minusSeconds(60), PageRequest.of(0, 10));
+                    TaskStatus.PENDING, Instant.now().minusSeconds(60), PageRequest.of(0, 10));
 
             assertThat(result).hasSize(1);
         }
 
         @Test
-        @DisplayName("should NOT return tasks updated after the cutoff")
-        void shouldExcludeRecentlyUpdatedTasks() {
-            taskRepository.saveAndFlush(buildTask(Instant.now().minusSeconds(600)));
+        @DisplayName("should NOT return tasks dispatched after the cutoff")
+        void shouldExcludeRecentlyDispatchedTasks() {
+            Task task = buildTask(Instant.now().minusSeconds(600));
+            task.markDispatched();
+            taskRepository.saveAndFlush(task);
 
             List<Task> result = taskRepository.findOrphanedPendingTasks(
-                    TaskStatus.PENDING, Instant.now(), Instant.now().minusSeconds(3600), PageRequest.of(0, 10));
+                    TaskStatus.PENDING, Instant.now().minusSeconds(3600), PageRequest.of(0, 10));
 
             assertThat(result).isEmpty();
         }
 
         @Test
-        @DisplayName("should NOT return tasks that are not yet due")
-        void shouldExcludeNotYetDueTasks() {
-            taskRepository.saveAndFlush(buildTask(Instant.now().plusSeconds(3600)));
+        @DisplayName("should NOT return tasks that were never dispatched")
+        void shouldExcludeNeverDispatchedTasks() {
+            taskRepository.saveAndFlush(buildTask(Instant.now().minusSeconds(600)));
 
             List<Task> result = taskRepository.findOrphanedPendingTasks(
-                    TaskStatus.PENDING, Instant.now(), Instant.now().minusSeconds(60), PageRequest.of(0, 10));
+                    TaskStatus.PENDING, Instant.now(), PageRequest.of(0, 10));
 
             assertThat(result).isEmpty();
         }
@@ -315,13 +319,84 @@ class TaskRepositoryTest {
         @DisplayName("should NOT return RUNNING tasks")
         void shouldExcludeRunningTasks() {
             Task task = buildTask(Instant.now().minusSeconds(600));
+            task.markDispatched();
+            task = taskRepository.saveAndFlush(task);
+            backdateDispatchedAt(task, Instant.now().minusSeconds(600));
+            task = taskRepository.findById(task.getId()).orElseThrow();
             task.start();
             taskRepository.saveAndFlush(task);
 
             List<Task> result = taskRepository.findOrphanedPendingTasks(
-                    TaskStatus.PENDING, Instant.now(), Instant.now().minusSeconds(60), PageRequest.of(0, 10));
+                    TaskStatus.PENDING, Instant.now().minusSeconds(60), PageRequest.of(0, 10));
 
             assertThat(result).isEmpty();
+        }
+    }
+
+    @Nested
+    @DisplayName("findUndispatchedDueTasks()")
+    class FindUndispatchedDueTasks {
+
+        @Test
+        @DisplayName("should return due PENDING tasks that were never dispatched")
+        void shouldReturnDueUndispatchedTasks() {
+            taskRepository.save(buildTask(Instant.now().minusSeconds(60)));
+
+            List<Task> result = taskRepository.findUndispatchedDueTasks(
+                    TaskStatus.PENDING, Instant.now(), PageRequest.of(0, 10));
+
+            assertThat(result).hasSize(1);
+        }
+
+        @Test
+        @DisplayName("should NOT return tasks that are not yet due")
+        void shouldExcludeNotYetDueTasks() {
+            taskRepository.save(buildTask(Instant.now().plusSeconds(3600)));
+
+            List<Task> result = taskRepository.findUndispatchedDueTasks(
+                    TaskStatus.PENDING, Instant.now(), PageRequest.of(0, 10));
+
+            assertThat(result).isEmpty();
+        }
+
+        @Test
+        @DisplayName("should NOT return tasks already dispatched")
+        void shouldExcludeAlreadyDispatchedTasks() {
+            Task task = buildTask(Instant.now().minusSeconds(60));
+            task.markDispatched();
+            taskRepository.save(task);
+
+            List<Task> result = taskRepository.findUndispatchedDueTasks(
+                    TaskStatus.PENDING, Instant.now(), PageRequest.of(0, 10));
+
+            assertThat(result).isEmpty();
+        }
+
+        @Test
+        @DisplayName("should NOT return RUNNING tasks")
+        void shouldExcludeRunningTasks() {
+            Task task = buildTask(Instant.now().minusSeconds(60));
+            task.start();
+            taskRepository.save(task);
+
+            List<Task> result = taskRepository.findUndispatchedDueTasks(
+                    TaskStatus.PENDING, Instant.now(), PageRequest.of(0, 10));
+
+            assertThat(result).isEmpty();
+        }
+
+        @Test
+        @DisplayName("should respect page size limit")
+        void shouldRespectPageLimit() {
+            Instant past = Instant.now().minusSeconds(60);
+            for (int i = 0; i < 5; i++) {
+                taskRepository.save(Task.create("task-" + i, "T", "{}", 1, past));
+            }
+
+            List<Task> result = taskRepository.findUndispatchedDueTasks(
+                    TaskStatus.PENDING, Instant.now(), PageRequest.of(0, 3));
+
+            assertThat(result).hasSize(3);
         }
     }
 

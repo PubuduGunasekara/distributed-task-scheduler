@@ -37,6 +37,12 @@ class TaskTest {
         }
 
         @Test
+        @DisplayName("should initialize dispatchedAt to null")
+        void shouldInitializeDispatchedAtToNull() {
+            assertThat(buildTask().getDispatchedAt()).isNull();
+        }
+
+        @Test
         @DisplayName("should throw when priority is negative")
         void shouldThrowForNegativePriority() {
             assertThatThrownBy(() ->
@@ -212,6 +218,51 @@ class TaskTest {
             Task task = buildRunningTask();
             assertThatThrownBy(task::cancel)
                     .isInstanceOf(IllegalStateException.class);
+        }
+    }
+
+    @Nested
+    @DisplayName("markDispatched()")
+    class MarkDispatched {
+
+        @Test
+        @DisplayName("should set dispatchedAt")
+        void shouldSetDispatchedAt() {
+            Task task = buildTask();
+            task.markDispatched();
+            assertThat(task.getDispatchedAt()).isNotNull();
+        }
+
+        @Test
+        @DisplayName("should not change status")
+        void shouldNotChangeStatus() {
+            Task task = buildTask();
+            task.markDispatched();
+            assertThat(task.getStatus()).isEqualTo(TaskStatus.PENDING);
+        }
+
+        @Test
+        @DisplayName("should throw when not PENDING")
+        void shouldThrowWhenNotPending() {
+            Task task = buildRunningTask();
+            assertThatThrownBy(task::markDispatched)
+                    .isInstanceOf(IllegalStateException.class);
+        }
+    }
+
+    @Nested
+    @DisplayName("scheduleRetry()")
+    class ScheduleRetry {
+
+        @Test
+        @DisplayName("should set dispatchedAt, since it immediately re-publishes TASK_CREATED")
+        void shouldSetDispatchedAt() {
+            Task task = buildRunningTask();
+            task.fail("timeout");
+
+            task.scheduleRetry();
+
+            assertThat(task.getDispatchedAt()).isNotNull();
         }
     }
 

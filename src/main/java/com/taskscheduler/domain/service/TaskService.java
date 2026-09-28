@@ -38,16 +38,27 @@ public class TaskService {
     private final TaskRepository taskRepository;
     private final TaskEventPort taskEventPort;
 
+    /**
+     * Only publishes TASK_CREATED immediately if the task is already due.
+     * A task scheduled for the future is saved as PENDING with
+     * dispatchedAt left null; DueTaskDispatchScheduler publishes it once
+     * scheduledAt actually arrives.
+     */
     public Task createTask(
             String name, String type, String payload,
             int priority, Instant scheduledAt
     ) {
-        Task task  = Task.create(name, type, payload, priority, scheduledAt);
+        Task task = Task.create(name, type, payload, priority, scheduledAt);
+        if (task.isDue()) {
+            task.markDispatched();
+        }
         Task saved = taskRepository.save(task);
-        taskEventPort.publish(saved, TaskEventType.TASK_CREATED);
-        log.info("Task created: id={} name='{}' type={} priority={} scheduledAt={}",
+        if (saved.getDispatchedAt() != null) {
+            taskEventPort.publish(saved, TaskEventType.TASK_CREATED);
+        }
+        log.info("Task created: id={} name='{}' type={} priority={} scheduledAt={} dispatched={}",
                 saved.getId(), saved.getName(), saved.getType(),
-                saved.getPriority(), saved.getScheduledAt());
+                saved.getPriority(), saved.getScheduledAt(), saved.getDispatchedAt() != null);
         return saved;
     }
 
@@ -143,20 +154,41 @@ public class TaskService {
     }
 
     @Transactional(readOnly = true)
-    public List<Task> getOrphanedPendingTasks(Instant now, Instant cutoff, int limit) {
+    public List<Task> getOrphanedPendingTasks(Instant cutoff, int limit) {
         return taskRepository.findOrphanedPendingTasks(
-                TaskStatus.PENDING, now, cutoff, PageRequest.of(0, limit));
+                TaskStatus.PENDING, cutoff, PageRequest.of(0, limit));
     }
 
     /**
-     * Re-publishes TASK_CREATED for a task that is still PENDING.
-     * Does not touch task state — the task was never actually consumed,
-     * so there's nothing to transition. Used by the recovery scheduler
-     * when a TASK_CREATED event is presumed lost.
+     * Re-publishes TASK_CREATED for a task that was dispatched before but
+     * whose event is presumed lost. Bumps dispatchedAt so this orphan sweep
+     * doesn't immediately re-flag the same task next poll cycle. Used by
+     * StaleTaskRecoveryScheduler — a safety net, not the primary dispatch path.
      */
     public void republishOrphanedTask(UUID id) {
+        dispatch(id, "Orphaned task re-dispatched");
+    }
+
+    @Transactional(readOnly = true)
+    public List<Task> getUndispatchedDueTasks(Instant now, int limit) {
+        return taskRepository.findUndispatchedDueTasks(
+                TaskStatus.PENDING, now, PageRequest.of(0, limit));
+    }
+
+    /**
+     * Publishes TASK_CREATED for a task that just became due and was never
+     * dispatched before. This is the primary dispatch mechanism for tasks
+     * created with a future scheduledAt — see DueTaskDispatchScheduler.
+     */
+    public void dispatchTask(UUID id) {
+        dispatch(id, "Task dispatched");
+    }
+
+    private void dispatch(UUID id, String logMessage) {
         Task task = getTask(id);
-        taskEventPort.publish(task, TaskEventType.TASK_CREATED);
-        log.info("Orphaned task re-published: id={} retryCount={}", id, task.getRetryCount());
+        task.markDispatched();
+        Task saved = taskRepository.save(task);
+        taskEventPort.publish(saved, TaskEventType.TASK_CREATED);
+        log.info("{}: id={} retryCount={}", logMessage, id, saved.getRetryCount());
     }
 }
