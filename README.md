@@ -207,7 +207,7 @@ This project was a hands-on study of the patterns behind real distributed system
 
 **Pubudu Gunasekara**
 M.S. Computer Science, Northeastern University (Silicon Valley)
-Backend and distributed systems. Open to a software engineering co-op (Jan to Aug 2027).
+Backend and distributed systems. Open to a software engineering co-op (Summer 2027).
 
 [![Portfolio](https://img.shields.io/badge/Portfolio-Visit-0A0A0A?style=flat-square&logo=googlechrome&logoColor=white)](https://pubudugunasekara.github.io/)
 [![LinkedIn](https://img.shields.io/badge/LinkedIn-Connect-0A66C2?style=flat-square&logo=linkedin&logoColor=white)](https://www.linkedin.com/in/pubudugunasekera/)
