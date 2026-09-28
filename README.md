@@ -60,7 +60,7 @@ Running background jobs *reliably* is harder than it looks. Here are the real pr
 
 ```mermaid
 graph TB
-    Client([HTTP Client]) -->|POST /api/v1/tasks| RL[Rate Limiter<br/>Redis token bucket]
+    Client([HTTP Client]) -->|POST /api/v1/tasks| RL[Rate Limiter<br/>Redis fixed-window counter]
     RL -->|429 if over limit| Client
     RL -->|allowed| API[REST API<br/>Spring Boot]
     API -->|save| DB[(PostgreSQL)]
@@ -189,10 +189,11 @@ The `domain` layer depends on nothing external. That boundary is checked automat
 ## Known Limitations and Next Steps
 
 - **Fixed lock TTL, no lease renewal or fencing tokens** — a job whose real runtime exceeds the recovery scheduler's execution timeout (default 5 minutes) can be marked failed while the original worker is still legitimately running it. The state machine prevents any corruption, but the worker's real outcome is silently discarded rather than surfaced. Set the timeout well above the slowest expected job type.
+- **Fixed-window rate limiting allows boundary bursts.** Because the window resets on a fixed schedule rather than continuously refilling, a client can send up to the limit right before a window boundary and again right after, bursting close to 2x the configured limit within a short span across that boundary.
 - **At-least-once delivery end to end** (Kafka redelivery, orphan re-publishing, retry re-queuing) — job executors with external side effects must be idempotent; the scheduler doesn't deduplicate at the business-logic level.
 - **Retries and recovery are both polling-based** — actual retry delay is backoff plus up to one 30-second poll interval, and a stuck job can sit for up to one recovery-scheduler poll interval (default 60s) past its timeout before being noticed.
-- **No leader election for the recovery scheduler** — every app instance runs it independently, which is safe (optimistic locking and the state machine are the real guards, not scheduling) but means redundant recovery attempts under multiple instances.
-- **A single poll cycle caps how many stale jobs it processes** (100 by default) — a larger backlog clears over several cycles, not immediately.
+- **No leader election for the recovery or dispatch schedulers** — every app instance runs them independently, which is safe (optimistic locking and the state machine are the real guards, not scheduling) but means redundant attempts under multiple instances.
+- **A single poll cycle caps how many stale or due jobs it processes** (100 by default) — a larger backlog clears over several cycles, not immediately.
 
 ---
 

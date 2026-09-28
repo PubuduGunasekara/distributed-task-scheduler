@@ -12,24 +12,33 @@ import org.springframework.stereotype.Component;
 import java.util.List;
 
 /**
- * Token bucket rate limiter backed by Redis.
+ * Fixed-window rate limiter backed by Redis.
+ *
+ * This is a fixed-window counter, not a token bucket: there's no
+ * continuous refill. A counter is set to the limit at the start of a
+ * window and decrements on each request; when the window's TTL expires,
+ * the key disappears and the next request starts a brand-new window at
+ * full capacity. See Known Limitations in the README for the resulting
+ * boundary-burst tradeoff (a client can burst up to ~2x the limit across
+ * a window boundary).
  *
  * The Lua script is the critical piece. It runs atomically on the Redis
  * server — the entire GET-check-DECR-or-SET sequence is uninterruptible.
  *
  * Script logic:
- *   GET the current token count for this client.
- *   If key doesn't exist (first request or window expired):
+ *   GET the current counter for this client.
+ *   If key doesn't exist (first request in this window, or the previous
+ *   window's key just expired):
  *     → SET key = (limit - 1) with TTL = window
- *     → return (limit - 1)   [allowed, consumed 1 of limit tokens]
+ *     → return (limit - 1)   [allowed, consumed 1 of limit for this window]
  *   If current count > 0:
  *     → DECR key
  *     → return remaining      [allowed]
  *   If current count == 0:
- *     → return -1             [denied, bucket empty]
+ *     → return -1             [denied, window exhausted]
  *
  * Return value contract:
- *   >= 0 → allowed, value is remaining token count
+ *   >= 0 → allowed, value is remaining count for this window
  *   -1   → denied
  *
  * Key format: "rate-limit:{clientId}"
@@ -43,7 +52,7 @@ public class RedisRateLimiter implements RateLimiterPort {
 
     static final String KEY_PREFIX = "rate-limit:";
 
-    private static final DefaultRedisScript<Long> TOKEN_BUCKET_SCRIPT =
+    private static final DefaultRedisScript<Long> FIXED_WINDOW_SCRIPT =
             new DefaultRedisScript<>(
                     """
                     local key     = KEYS[1]
@@ -69,7 +78,7 @@ public class RedisRateLimiter implements RateLimiterPort {
     public RateLimitResult tryConsume(String clientId) {
         String key    = KEY_PREFIX + clientId;
         Long   result = redisTemplate.execute(
-                TOKEN_BUCKET_SCRIPT,
+                FIXED_WINDOW_SCRIPT,
                 List.of(key),
                 String.valueOf(properties.requestsPerWindow()),
                 String.valueOf(properties.windowSeconds())
