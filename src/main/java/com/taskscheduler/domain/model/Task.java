@@ -88,6 +88,15 @@ public class Task {
     @Column(name = "max_retries", nullable = false)
     private int maxRetries = 3;
 
+    /**
+     * When a TASK_CREATED event was last published for this task.
+     * Null means never dispatched. Distinguishes "still waiting for
+     * scheduledAt" from "dispatched, but the event may have been lost" —
+     * see DueTaskDispatchScheduler and StaleTaskRecoveryScheduler.
+     */
+    @Column(name = "dispatched_at")
+    private Instant dispatchedAt;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
@@ -166,11 +175,30 @@ public class Task {
         }
     }
 
-    /** FAILED → PENDING (re-queue for retry) */
+    /**
+     * Records that a TASK_CREATED event was just published for this task.
+     * Does not change status — the task is still PENDING, just no longer
+     * "never dispatched." Called both at creation (if already due) and by
+     * DueTaskDispatchScheduler / StaleTaskRecoveryScheduler.
+     */
+    public void markDispatched() {
+        requireStatus(TaskStatus.PENDING, "markDispatched");
+        this.dispatchedAt = Instant.now();
+        this.updatedAt    = Instant.now();
+    }
+
+    /**
+     * FAILED → PENDING (re-queue for retry).
+     * Sets dispatchedAt directly rather than via markDispatched(): the
+     * caller (TaskService.scheduleRetry()) always publishes TASK_CREATED
+     * immediately afterward, so dispatchedAt must reflect that now, not
+     * whatever it was set to on a previous attempt.
+     */
     public void scheduleRetry() {
         requireStatus(TaskStatus.FAILED, "scheduleRetry");
-        this.status    = TaskStatus.PENDING;
-        this.updatedAt = Instant.now();
+        this.status       = TaskStatus.PENDING;
+        this.dispatchedAt = Instant.now();
+        this.updatedAt    = Instant.now();
     }
 
     /** PENDING → CANCELLED */

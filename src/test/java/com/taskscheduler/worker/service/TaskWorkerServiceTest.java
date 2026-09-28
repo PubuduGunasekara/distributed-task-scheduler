@@ -22,6 +22,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.time.Instant;
 import java.util.UUID;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
@@ -100,6 +101,7 @@ class TaskWorkerServiceTest {
             Task running = minimalMock(id);
             when(lockPort.acquireLock(eq(id), anyString())).thenReturn(true);
             when(taskService.startTask(id)).thenReturn(running);
+            when(taskService.failTask(eq(id), anyString())).thenReturn(mock(Task.class));
             doThrow(new RuntimeException("timeout"))
                     .when(executorRegistry).execute(running);
 
@@ -138,8 +140,11 @@ class TaskWorkerServiceTest {
         void shouldFailTaskWhenExecutorThrows() throws Exception {
             UUID id      = UUID.randomUUID();
             Task running = minimalMock(id);
+            Task failed  = mock(Task.class);
+            when(failed.getStatus()).thenReturn(TaskStatus.FAILED);
             when(lockPort.acquireLock(eq(id), anyString())).thenReturn(true);
             when(taskService.startTask(id)).thenReturn(running);
+            when(taskService.failTask(id, "connection timeout")).thenReturn(failed);
             doThrow(new RuntimeException("connection timeout"))
                     .when(executorRegistry).execute(running);
 
@@ -147,6 +152,26 @@ class TaskWorkerServiceTest {
 
             verify(taskService).failTask(id, "connection timeout");
             verify(taskService, never()).completeTask(any());
+        }
+
+        @Test
+        @DisplayName("should record dead-lettered metric when fail() exhausts retries")
+        void shouldRecordDeadLetteredMetricWhenExhausted() throws Exception {
+            UUID id      = UUID.randomUUID();
+            Task running = minimalMock(id);
+            Task deadLettered = mock(Task.class);
+            when(deadLettered.getStatus()).thenReturn(TaskStatus.DEAD_LETTER);
+            when(deadLettered.getType()).thenReturn("EMAIL_SEND");
+            when(lockPort.acquireLock(eq(id), anyString())).thenReturn(true);
+            when(taskService.startTask(id)).thenReturn(running);
+            when(taskService.failTask(id, "final failure")).thenReturn(deadLettered);
+            doThrow(new RuntimeException("final failure"))
+                    .when(executorRegistry).execute(running);
+
+            workerService.process(createdEvent(id));
+
+            assertThat(meterRegistry.get("tasks.dead_lettered.total")
+                    .tag("type", "EMAIL_SEND").counter().count()).isEqualTo(1.0);
         }
 
         @Test

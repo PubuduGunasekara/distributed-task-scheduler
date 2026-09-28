@@ -4,6 +4,7 @@ import com.taskscheduler.domain.event.TaskEvent;
 import com.taskscheduler.domain.event.TaskEventType;
 import com.taskscheduler.domain.exception.TaskNotFoundException;
 import com.taskscheduler.domain.model.Task;
+import com.taskscheduler.domain.model.TaskStatus;
 import com.taskscheduler.domain.port.DistributedLockPort;
 import com.taskscheduler.domain.service.TaskService;
 import com.taskscheduler.infrastructure.metrics.TaskMetrics;
@@ -101,7 +102,10 @@ public class TaskWorkerService {
             sample.stop(taskMetrics.executionTimer(task.getType()));
             taskMetrics.recordTaskFailed(task.getType());
             log.error("Task execution failed: taskId={}", taskId, ex);
-            taskService.failTask(taskId, ex.getMessage());
+            Task failed = taskService.failTask(taskId, ex.getMessage());
+            if (failed.getStatus() == TaskStatus.DEAD_LETTER) {
+                taskMetrics.recordTaskDeadLettered(failed.getType());
+            }
         }
     }
 }

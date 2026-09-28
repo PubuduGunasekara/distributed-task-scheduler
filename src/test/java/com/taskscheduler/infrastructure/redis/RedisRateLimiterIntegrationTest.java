@@ -19,7 +19,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Integration tests running RedisRateLimiter's token-bucket Lua script
+ * Integration tests running RedisRateLimiter's fixed-window Lua script
  * against a real Redis via Testcontainers. The script's atomicity (the
  * whole GET-check-DECR-or-SET sequence as one uninterruptible operation)
  * can't be verified against a mocked StringRedisTemplate.

@@ -2,6 +2,7 @@ package com.taskscheduler.worker.recovery;
 
 import com.taskscheduler.config.RecoveryProperties;
 import com.taskscheduler.domain.model.Task;
+import com.taskscheduler.domain.model.TaskStatus;
 import com.taskscheduler.domain.service.TaskService;
 import com.taskscheduler.infrastructure.metrics.TaskMetrics;
 import lombok.RequiredArgsConstructor;
@@ -27,11 +28,14 @@ import java.util.UUID;
  *    moves it out of RUNNING. We fail it through the normal domain path,
  *    so it flows through the existing retry/backoff/dead-letter pipeline.
  *
- * 2. Orphaned PENDING tasks — a due task whose TASK_CREATED event never
- *    reached a worker (published-but-lost, or lock-rejected while the
- *    real event was acknowledged anyway). We re-publish TASK_CREATED for
- *    it. This is safe to repeat: the Redis lock and the PENDING-only state
- *    transition in startTask() make duplicate events harmless.
+ * 2. Orphaned PENDING tasks — a task that WAS dispatched (dispatchedAt
+ *    set) but its TASK_CREATED event never reached a worker (published-
+ *    but-lost, or lock-rejected while the real event was acknowledged
+ *    anyway). We re-publish TASK_CREATED for it. This is a safety net,
+ *    not the primary dispatch mechanism — DueTaskDispatchScheduler
+ *    handles tasks that were never dispatched at all. Safe to repeat:
+ *    the Redis lock and the PENDING-only state transition in startTask()
+ *    make duplicate events harmless.
  *
  * Runs on every app instance. Multiple instances racing on the same task
  * is expected and safe — the state machine (requireStatus) and JPA
@@ -66,8 +70,11 @@ public class StaleTaskRecoveryScheduler {
         for (Task task : stuck) {
             UUID taskId = task.getId();
             try {
-                taskService.failTask(taskId, "Execution timed out: worker presumed dead");
+                Task failed = taskService.failTask(taskId, "Execution timed out: worker presumed dead");
                 taskMetrics.recordTaskRecoveredFromTimeout();
+                if (failed.getStatus() == TaskStatus.DEAD_LETTER) {
+                    taskMetrics.recordTaskDeadLettered(failed.getType());
+                }
                 recovered++;
             } catch (OptimisticLockingFailureException | IllegalStateException ex) {
                 // Another instance already recovered it, or the original worker
@@ -83,9 +90,8 @@ public class StaleTaskRecoveryScheduler {
     }
 
     private void republishOrphanedPendingTasks() {
-        Instant now    = Instant.now();
-        Instant cutoff = now.minus(properties.orphanThreshold());
-        List<Task> orphans = taskService.getOrphanedPendingTasks(now, cutoff, properties.batchSize());
+        Instant cutoff = Instant.now().minus(properties.orphanThreshold());
+        List<Task> orphans = taskService.getOrphanedPendingTasks(cutoff, properties.batchSize());
 
         if (orphans.isEmpty()) {
             return;

@@ -130,8 +130,7 @@ class TaskServiceTest {
         @Test
         @DisplayName("should save and return the task")
         void shouldSaveAndReturn() {
-            Task expected = buildPendingTask();
-            when(taskRepository.save(any(Task.class))).thenReturn(expected);
+            when(taskRepository.save(any(Task.class))).thenAnswer(inv -> inv.getArgument(0));
 
             Task result = taskService.createTask(
                     "test", "EMAIL", "{}", 5, Instant.now()
@@ -141,6 +140,33 @@ class TaskServiceTest {
             verify(taskRepository, times(1)).save(any(Task.class));
             verify(taskEventPort, times(1))
                     .publish(any(Task.class), eq(TaskEventType.TASK_CREATED));
+        }
+
+        @Test
+        @DisplayName("should NOT publish TASK_CREATED when scheduledAt is in the future")
+        void shouldNotPublishWhenNotYetDue() {
+            when(taskRepository.save(any(Task.class))).thenAnswer(inv -> inv.getArgument(0));
+
+            Task result = taskService.createTask(
+                    "test", "EMAIL", "{}", 5, Instant.now().plusSeconds(3600)
+            );
+
+            assertThat(result.getStatus()).isEqualTo(TaskStatus.PENDING);
+            assertThat(result.getDispatchedAt()).isNull();
+            verifyNoInteractions(taskEventPort);
+        }
+
+        @Test
+        @DisplayName("should publish TASK_CREATED when scheduledAt is now or in the past")
+        void shouldPublishWhenAlreadyDue() {
+            when(taskRepository.save(any(Task.class))).thenAnswer(inv -> inv.getArgument(0));
+
+            Task result = taskService.createTask(
+                    "test", "EMAIL", "{}", 5, Instant.now().minusSeconds(60)
+            );
+
+            assertThat(result.getDispatchedAt()).isNotNull();
+            verify(taskEventPort).publish(any(Task.class), eq(TaskEventType.TASK_CREATED));
         }
 
         @Test

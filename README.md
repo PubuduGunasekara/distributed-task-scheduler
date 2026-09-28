@@ -52,7 +52,7 @@ Running background jobs *reliably* is harder than it looks. Here are the real pr
 - **Recover automatically when a worker crashes.** If a worker dies mid-job, the job would otherwise sit stuck forever — its Redis lock eventually expires, but nothing else notices on its own. A background scheduler polls for jobs stuck running past a timeout and fails them through the same retry path as any other failure, and separately re-publishes jobs whose creation event appears to have been lost. Multiple app instances can run this at once safely; a lost race is just a database exception that gets logged and skipped.
 - **See what's happening.** Every component reports metrics to Prometheus, which are visualized in Grafana dashboards.
 - **Keep the code clean.** The business logic is isolated from the infrastructure with a ports-and-adapters (hexagonal) architecture, and a build-time ArchUnit test fails the build if that boundary is ever broken.
-- **Prove it with tests, not just claims.** 165 tests — unit tests plus real-Postgres and real-Redis integration tests via Testcontainers — with CI enforcing an 80% line and 80% branch coverage gate. The current run sits at 94.6% line / 90.0% branch.
+- **Prove it with tests, not just claims.** 188 tests — unit tests plus real-Postgres and real-Redis integration tests via Testcontainers — with CI enforcing an 80% line and 80% branch coverage gate. The current run sits at 93.4% line / 91.1% branch.
 
 ---
 
@@ -60,7 +60,7 @@ Running background jobs *reliably* is harder than it looks. Here are the real pr
 
 ```mermaid
 graph TB
-    Client([HTTP Client]) -->|POST /api/v1/tasks| RL[Rate Limiter<br/>Redis token bucket]
+    Client([HTTP Client]) -->|POST /api/v1/tasks| RL[Rate Limiter<br/>Redis fixed-window counter]
     RL -->|429 if over limit| Client
     RL -->|allowed| API[REST API<br/>Spring Boot]
     API -->|save| DB[(PostgreSQL)]
@@ -167,6 +167,8 @@ curl -X POST http://localhost:8080/api/v1/tasks \
   }'
 ```
 
+A future `scheduledAt` genuinely defers execution — the task is saved as PENDING and only dispatched once that time arrives, instead of running immediately.
+
 ---
 
 ## Project Structure
@@ -186,11 +188,12 @@ The `domain` layer depends on nothing external. That boundary is checked automat
 
 ## Known Limitations and Next Steps
 
-- **Fixed lock TTL, no lease renewal or fencing tokens** — a job whose real runtime exceeds the recovery scheduler's execution timeout (default 5 minutes) can be marked failed while the original worker is still legitimately running it. The state machine prevents any corruption, but the worker's real outcome is silently discarded rather than surfaced. Set the timeout well above the slowest expected job type.
+- **Fixed lock TTL (30s), no lease renewal or fencing tokens — a job can run twice.** The recovery scheduler's execution timeout (default 5 minutes) is much longer than the lock TTL, so a job that genuinely runs longer than the timeout can be marked failed and retried on another worker while the original worker is still legitimately executing it. The job's side effects can run twice, even though the database state machine prevents any state corruption (the original worker's eventual `completeTask()`/`failTask()` call just throws `IllegalStateException` and is logged, not applied). This is a known, industry-standard limitation of TTL-based locks without fencing tokens or lease renewal. Set the timeout well above the slowest expected job type to make this rare in practice.
+- **Fixed-window rate limiting allows boundary bursts.** Because the window resets on a fixed schedule rather than continuously refilling, a client can send up to the limit right before a window boundary and again right after, bursting close to 2x the configured limit within a short span across that boundary.
 - **At-least-once delivery end to end** (Kafka redelivery, orphan re-publishing, retry re-queuing) — job executors with external side effects must be idempotent; the scheduler doesn't deduplicate at the business-logic level.
 - **Retries and recovery are both polling-based** — actual retry delay is backoff plus up to one 30-second poll interval, and a stuck job can sit for up to one recovery-scheduler poll interval (default 60s) past its timeout before being noticed.
-- **No leader election for the recovery scheduler** — every app instance runs it independently, which is safe (optimistic locking and the state machine are the real guards, not scheduling) but means redundant recovery attempts under multiple instances.
-- **A single poll cycle caps how many stale jobs it processes** (100 by default) — a larger backlog clears over several cycles, not immediately.
+- **No leader election for the recovery or dispatch schedulers** — every app instance runs them independently, which is safe (optimistic locking and the state machine are the real guards, not scheduling) but means redundant attempts under multiple instances.
+- **A single poll cycle caps how many stale or due jobs it processes** (100 by default) — a larger backlog clears over several cycles, not immediately.
 
 ---
 

@@ -2,6 +2,7 @@ package com.taskscheduler.worker.recovery;
 
 import com.taskscheduler.config.RecoveryProperties;
 import com.taskscheduler.domain.model.Task;
+import com.taskscheduler.domain.model.TaskStatus;
 import com.taskscheduler.domain.service.TaskService;
 import com.taskscheduler.infrastructure.metrics.TaskMetrics;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -19,6 +20,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.UUID;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
@@ -42,7 +44,11 @@ class StaleTaskRecoverySchedulerTest {
     void setUp() {
         scheduler = new StaleTaskRecoveryScheduler(taskService, taskMetrics, properties);
         lenient().when(taskService.getStaleRunningTasks(any(), anyInt())).thenReturn(List.of());
-        lenient().when(taskService.getOrphanedPendingTasks(any(), any(), anyInt())).thenReturn(List.of());
+        lenient().when(taskService.getOrphanedPendingTasks(any(), anyInt())).thenReturn(List.of());
+        // Default: failTask() returns a bare mock (getStatus() == null, so it's
+        // never mistaken for DEAD_LETTER). Tests that care about the dead-letter
+        // metric stub a specific return value instead.
+        lenient().when(taskService.failTask(any(), anyString())).thenReturn(mock(Task.class));
     }
 
     // =========================================================
@@ -109,18 +115,35 @@ class StaleTaskRecoverySchedulerTest {
         }
 
         @Test
+        @DisplayName("should record the dead-lettered metric when recovery exhausts retries")
+        void shouldRecordDeadLetteredMetricWhenExhausted() {
+            UUID id = UUID.randomUUID();
+            Task task = taskWithId(id);
+            Task deadLettered = mock(Task.class);
+            when(deadLettered.getStatus()).thenReturn(TaskStatus.DEAD_LETTER);
+            when(deadLettered.getType()).thenReturn("EMAIL_SEND");
+            when(taskService.getStaleRunningTasks(any(), eq(100))).thenReturn(List.of(task));
+            when(taskService.failTask(id, TIMEOUT_MESSAGE)).thenReturn(deadLettered);
+
+            scheduler.recoverStaleTasks();
+
+            assertThat(meterRegistry.get("tasks.dead_lettered.total")
+                    .tag("type", "EMAIL_SEND").counter().count()).isEqualTo(1.0);
+        }
+
+        @Test
         @DisplayName("should query with the configured batch size as the limit")
         void shouldRespectBatchSize() {
             RecoveryProperties smallBatch = new RecoveryProperties(
                     Duration.ofSeconds(60), Duration.ofMinutes(5), Duration.ofMinutes(2), 5);
             scheduler = new StaleTaskRecoveryScheduler(taskService, taskMetrics, smallBatch);
             when(taskService.getStaleRunningTasks(any(), anyInt())).thenReturn(List.of());
-            when(taskService.getOrphanedPendingTasks(any(), any(), anyInt())).thenReturn(List.of());
+            when(taskService.getOrphanedPendingTasks(any(), anyInt())).thenReturn(List.of());
 
             scheduler.recoverStaleTasks();
 
             verify(taskService).getStaleRunningTasks(any(), eq(5));
-            verify(taskService).getOrphanedPendingTasks(any(), any(), eq(5));
+            verify(taskService).getOrphanedPendingTasks(any(), eq(5));
         }
     }
 
@@ -137,7 +160,7 @@ class StaleTaskRecoverySchedulerTest {
         void shouldRepublishOrphan() {
             UUID id = UUID.randomUUID();
             Task task = taskWithId(id);
-            when(taskService.getOrphanedPendingTasks(any(), any(), eq(100)))
+            when(taskService.getOrphanedPendingTasks(any(), eq(100)))
                     .thenReturn(List.of(task));
 
             scheduler.recoverStaleTasks();
@@ -160,7 +183,7 @@ class StaleTaskRecoverySchedulerTest {
             UUID id2 = UUID.randomUUID();
             Task task1 = taskWithId(id1);
             Task task2 = taskWithId(id2);
-            when(taskService.getOrphanedPendingTasks(any(), any(), eq(100)))
+            when(taskService.getOrphanedPendingTasks(any(), eq(100)))
                     .thenReturn(List.of(task1, task2));
             doThrow(new ObjectOptimisticLockingFailureException(Task.class, id1))
                     .when(taskService).republishOrphanedTask(id1);
@@ -178,7 +201,7 @@ class StaleTaskRecoverySchedulerTest {
             UUID id2 = UUID.randomUUID();
             Task task1 = taskWithId(id1);
             Task task2 = taskWithId(id2);
-            when(taskService.getOrphanedPendingTasks(any(), any(), eq(100)))
+            when(taskService.getOrphanedPendingTasks(any(), eq(100)))
                     .thenReturn(List.of(task1, task2));
             doThrow(new IllegalStateException("not PENDING"))
                     .when(taskService).republishOrphanedTask(id1);
