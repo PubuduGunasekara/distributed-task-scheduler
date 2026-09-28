@@ -52,7 +52,7 @@ Running background jobs *reliably* is harder than it looks. Here are the real pr
 - **Recover automatically when a worker crashes.** If a worker dies mid-job, the job would otherwise sit stuck forever — its Redis lock eventually expires, but nothing else notices on its own. A background scheduler polls for jobs stuck running past a timeout and fails them through the same retry path as any other failure, and separately re-publishes jobs whose creation event appears to have been lost. Multiple app instances can run this at once safely; a lost race is just a database exception that gets logged and skipped.
 - **See what's happening.** Every component reports metrics to Prometheus, which are visualized in Grafana dashboards.
 - **Keep the code clean.** The business logic is isolated from the infrastructure with a ports-and-adapters (hexagonal) architecture, and a build-time ArchUnit test fails the build if that boundary is ever broken.
-- **Prove it with tests, not just claims.** 165 tests — unit tests plus real-Postgres and real-Redis integration tests via Testcontainers — with CI enforcing an 80% line and 80% branch coverage gate. The current run sits at 94.6% line / 90.0% branch.
+- **Prove it with tests, not just claims.** 188 tests — unit tests plus real-Postgres and real-Redis integration tests via Testcontainers — with CI enforcing an 80% line and 80% branch coverage gate. The current run sits at 93.4% line / 91.1% branch.
 
 ---
 
