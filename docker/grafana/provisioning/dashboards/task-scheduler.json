@@ -1,0 +1,189 @@
+{
+  "id": null,
+  "uid": "task-scheduler-overview",
+  "title": "Distributed Task Scheduler",
+  "description": "Task throughput, current queue state, execution latency, and retry/recovery activity — built from the metrics TaskMetrics and MetricsConfig actually emit.",
+  "tags": ["task-scheduler"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "10s",
+  "time": { "from": "now-1h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Tasks per minute (submitted / completed / failed / dead-lettered)",
+      "description": "tasks.submitted.total, tasks.completed.total, tasks.failed.total, tasks.dead_lettered.total",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 0 },
+      "fieldConfig": {
+        "defaults": { "unit": "reqpm", "custom": { "drawStyle": "line", "fillOpacity": 10 } },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": "Prometheus",
+          "expr": "sum(rate(tasks_submitted_total[1m])) * 60",
+          "legendFormat": "submitted"
+        },
+        {
+          "refId": "B",
+          "datasource": "Prometheus",
+          "expr": "sum(rate(tasks_completed_total[1m])) * 60",
+          "legendFormat": "completed"
+        },
+        {
+          "refId": "C",
+          "datasource": "Prometheus",
+          "expr": "sum(rate(tasks_failed_total[1m])) * 60",
+          "legendFormat": "failed"
+        },
+        {
+          "refId": "D",
+          "datasource": "Prometheus",
+          "expr": "sum(rate(tasks_dead_lettered_total[1m])) * 60",
+          "legendFormat": "dead-lettered"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Pending",
+      "description": "tasks.pending.count",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 8 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "datasource": "Prometheus", "expr": "sum(tasks_pending_count)" }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Running",
+      "description": "tasks.running.count",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 8 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "datasource": "Prometheus", "expr": "sum(tasks_running_count)" }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Failed (awaiting retry)",
+      "description": "tasks.failed.count",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 8 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1 },
+              { "color": "red", "value": 10 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        { "refId": "A", "datasource": "Prometheus", "expr": "sum(tasks_failed_count)" }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Dead-lettered",
+      "description": "tasks.dead_lettered.count",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 8 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        { "refId": "A", "datasource": "Prometheus", "expr": "sum(tasks_dead_lettered_count)" }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Execution duration (p50 / p95 / p99)",
+      "description": "tasks.execution.duration (Micrometer Timer with percentile histogram)",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 12 },
+      "fieldConfig": {
+        "defaults": { "unit": "s", "custom": { "drawStyle": "line", "fillOpacity": 5 } },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": "Prometheus",
+          "expr": "histogram_quantile(0.50, sum(rate(tasks_execution_duration_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p50"
+        },
+        {
+          "refId": "B",
+          "datasource": "Prometheus",
+          "expr": "histogram_quantile(0.95, sum(rate(tasks_execution_duration_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p95"
+        },
+        {
+          "refId": "C",
+          "datasource": "Prometheus",
+          "expr": "histogram_quantile(0.99, sum(rate(tasks_execution_duration_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p99"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Retry / recovery / orphan activity",
+      "description": "tasks.retry.scheduled.total, tasks.recovered.timeout.total, tasks.republished.orphan.total",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 20 },
+      "fieldConfig": {
+        "defaults": { "unit": "reqpm", "custom": { "drawStyle": "line", "fillOpacity": 10 } },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": "Prometheus",
+          "expr": "sum(rate(tasks_retry_scheduled_total[5m])) * 60",
+          "legendFormat": "retries scheduled"
+        },
+        {
+          "refId": "B",
+          "datasource": "Prometheus",
+          "expr": "sum(rate(tasks_recovered_timeout_total[5m])) * 60",
+          "legendFormat": "recovered from timeout"
+        },
+        {
+          "refId": "C",
+          "datasource": "Prometheus",
+          "expr": "sum(rate(tasks_republished_orphan_total[5m])) * 60",
+          "legendFormat": "orphans re-published"
+        }
+      ]
+    }
+  ]
+}

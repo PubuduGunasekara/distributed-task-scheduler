@@ -2,6 +2,7 @@ package com.taskscheduler.worker.recovery;
 
 import com.taskscheduler.config.RecoveryProperties;
 import com.taskscheduler.domain.model.Task;
+import com.taskscheduler.domain.model.TaskStatus;
 import com.taskscheduler.domain.service.TaskService;
 import com.taskscheduler.infrastructure.metrics.TaskMetrics;
 import lombok.RequiredArgsConstructor;
@@ -69,8 +70,11 @@ public class StaleTaskRecoveryScheduler {
         for (Task task : stuck) {
             UUID taskId = task.getId();
             try {
-                taskService.failTask(taskId, "Execution timed out: worker presumed dead");
+                Task failed = taskService.failTask(taskId, "Execution timed out: worker presumed dead");
                 taskMetrics.recordTaskRecoveredFromTimeout();
+                if (failed.getStatus() == TaskStatus.DEAD_LETTER) {
+                    taskMetrics.recordTaskDeadLettered(failed.getType());
+                }
                 recovered++;
             } catch (OptimisticLockingFailureException | IllegalStateException ex) {
                 // Another instance already recovered it, or the original worker

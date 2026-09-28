@@ -2,6 +2,7 @@ package com.taskscheduler.worker.recovery;
 
 import com.taskscheduler.config.RecoveryProperties;
 import com.taskscheduler.domain.model.Task;
+import com.taskscheduler.domain.model.TaskStatus;
 import com.taskscheduler.domain.service.TaskService;
 import com.taskscheduler.infrastructure.metrics.TaskMetrics;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -19,6 +20,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.UUID;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
@@ -43,6 +45,10 @@ class StaleTaskRecoverySchedulerTest {
         scheduler = new StaleTaskRecoveryScheduler(taskService, taskMetrics, properties);
         lenient().when(taskService.getStaleRunningTasks(any(), anyInt())).thenReturn(List.of());
         lenient().when(taskService.getOrphanedPendingTasks(any(), anyInt())).thenReturn(List.of());
+        // Default: failTask() returns a bare mock (getStatus() == null, so it's
+        // never mistaken for DEAD_LETTER). Tests that care about the dead-letter
+        // metric stub a specific return value instead.
+        lenient().when(taskService.failTask(any(), anyString())).thenReturn(mock(Task.class));
     }
 
     // =========================================================
@@ -106,6 +112,23 @@ class StaleTaskRecoverySchedulerTest {
             scheduler.recoverStaleTasks();
 
             verify(taskService).failTask(id2, TIMEOUT_MESSAGE);
+        }
+
+        @Test
+        @DisplayName("should record the dead-lettered metric when recovery exhausts retries")
+        void shouldRecordDeadLetteredMetricWhenExhausted() {
+            UUID id = UUID.randomUUID();
+            Task task = taskWithId(id);
+            Task deadLettered = mock(Task.class);
+            when(deadLettered.getStatus()).thenReturn(TaskStatus.DEAD_LETTER);
+            when(deadLettered.getType()).thenReturn("EMAIL_SEND");
+            when(taskService.getStaleRunningTasks(any(), eq(100))).thenReturn(List.of(task));
+            when(taskService.failTask(id, TIMEOUT_MESSAGE)).thenReturn(deadLettered);
+
+            scheduler.recoverStaleTasks();
+
+            assertThat(meterRegistry.get("tasks.dead_lettered.total")
+                    .tag("type", "EMAIL_SEND").counter().count()).isEqualTo(1.0);
         }
 
         @Test
